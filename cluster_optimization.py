@@ -41,9 +41,6 @@ use_hessian = True
 
 options = {
     "maxiter": 1000,
-    "ftol": 1e-12,
-    "gtol": 1e-8,
-    "maxls": 50,
 }
 
 save_best = True
