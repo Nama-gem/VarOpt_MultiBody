@@ -3,18 +3,13 @@
 #SBATCH --job-name=varopt_multibody
 #SBATCH --partition=jila
 #SBATCH --qos=long
-
 #SBATCH --array=0-14
-
 #SBATCH --time=7-00:00:00
 #SBATCH --mem=4G
 #SBATCH --cpus-per-task=1
 
-#SBATCH --output=/users/rey/raka3858/output/out-%x.%A_%a.out
-#SBATCH --error=/users/rey/raka3858/output/err-%x.%A_%a.err
-
-#SBATCH --mail-type=END,FAIL
-#SBATCH --mail-user=YOUR_EMAIL@colorado.edu
+#SBATCH --output=/users/rey/raka3858/VarOpt_MultiBody/output/out-%x.%A_%a.out
+#SBATCH --error=/users/rey/raka3858/VarOpt_MultiBody/output/err-%x.%A_%a.err
 
 
 # =============================================================================
@@ -22,20 +17,11 @@
 # =============================================================================
 
 PROJECT_DIR="/users/rey/raka3858/VarOpt_MultiBody"
+OUTPUT_DIR="${PROJECT_DIR}/output"
 
 PYTHON_SCRIPT="${PROJECT_DIR}/cluster_optimization.py"
 
-# IMPORTANT:
-# This should point to the Python executable in the environment
-# where numpy, scipy, numba, quspin, filelock, etc. are installed.
 PYTHON="/users/rey/raka3858/.conda/envs/varopt39/bin/python"
-
-
-# =============================================================================
-# Create output directory
-# =============================================================================
-
-mkdir -p "/users/rey/raka3858/output"
 
 
 # =============================================================================
@@ -45,6 +31,13 @@ mkdir -p "/users/rey/raka3858/output"
 if [[ ! -d "${PROJECT_DIR}" ]]; then
     echo "ERROR: Project directory does not exist:"
     echo "  ${PROJECT_DIR}"
+    exit 1
+fi
+
+if [[ ! -d "${OUTPUT_DIR}" ]]; then
+    echo "ERROR: Output directory does not exist:"
+    echo "  ${OUTPUT_DIR}"
+    echo "Create it before submitting the job."
     exit 1
 fi
 
@@ -77,6 +70,16 @@ unset PYTHONHOME
 export PYTHONNOUSERSITE=1
 
 hash -r
+
+
+# =============================================================================
+# Restrict numerical libraries to requested CPU count
+# =============================================================================
+
+export OMP_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
 
 
 # =============================================================================
@@ -116,8 +119,6 @@ print("filelock:", filelock.__version__)
 print("Environment import test succeeded.")
 '
 
-
-# Stop immediately if environment test failed
 if [[ $? -ne 0 ]]; then
     echo "ERROR: Python environment test failed."
     exit 1
@@ -134,12 +135,12 @@ echo
 
 "${PYTHON}" -u "${PYTHON_SCRIPT}"
 
-
-# =============================================================================
-# Check exit status
-# =============================================================================
-
 EXIT_CODE=$?
+
+
+# =============================================================================
+# Completion information
+# =============================================================================
 
 echo
 echo "========================================================================"
