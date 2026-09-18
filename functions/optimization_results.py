@@ -63,29 +63,66 @@ class OptimizationResultStore:
         self.lock_timeout = float(lock_timeout)
 
     def path_for(self, arr, gate_sequence, *, bounds=None, study=None):
-        """Deterministic path, without creating files or directories.
-
-        Optimizer, start point and tolerances are deliberately excluded, so
-        independent search strategies compete for the same best record.
-        A study label distinguishes custom constraints or search objectives.
         """
+        Deterministic path, without creating files or directories.
+
+        The provided self.directory is used directly. System parameters,
+        physical parameters, and study labels are included in the hash,
+        but are not added as extra subdirectories.
+        """
+
         gates = tuple(gate_sequence)
+
         if not gates or any(g not in arr.gates for g in gates):
-            raise ValueError('A nonempty sequence of supported gates is required.')
-        if study is not None and (not isinstance(study, str) or not study.strip()):
-            raise ValueError('study must be None or a nonempty string.')
-        state = np.ascontiguousarray(arr._initial_state, dtype='<c16')
-        case = dict(model=MODEL_VERSION, Lx=arr._Lx, Ly=arr._Ly, n=arr.n,
-                    Rb=float(arr.Rb).hex(), Omega=float(arr.Omega).hex(),
-                    boundary=arr.boundary, convention=arr.convention,
-                    backend=arr.backend, reflections=arr.use_reflections,
-                    initial_state=hashlib.sha256(state.tobytes()).hexdigest(),
-                    gates=gates, bounds=_bounds_key(gates, bounds), study=study)
-        digest = hashlib.sha256(json.dumps(case, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
-        system = f'{arr._Lx}x{arr._Ly}_n{arr.n}_{arr.boundary}_{arr.convention}'
-        physical = f'Rb{arr.Rb:.12g}_Omega{arr.Omega:.12g}'
-        filename = f'{_slug("_".join(gates))}--{digest}.json'
-        return self.directory / system / physical / _slug(study or 'default') / filename
+            raise ValueError(
+                'A nonempty sequence of supported gates is required.'
+            )
+
+        if study is not None and (
+                not isinstance(study, str) or not study.strip()
+        ):
+            raise ValueError(
+                'study must be None or a nonempty string.'
+            )
+
+        state = np.ascontiguousarray(
+            arr._initial_state,
+            dtype='<c16',
+        )
+
+        case = dict(
+            model=MODEL_VERSION,
+            Lx=arr._Lx,
+            Ly=arr._Ly,
+            n=arr.n,
+            Rb=float(arr.Rb).hex(),
+            Omega=float(arr.Omega).hex(),
+            boundary=arr.boundary,
+            convention=arr.convention,
+            backend=arr.backend,
+            reflections=arr.use_reflections,
+            initial_state=hashlib.sha256(
+                state.tobytes()
+            ).hexdigest(),
+            gates=gates,
+            bounds=_bounds_key(gates, bounds),
+            study=study,
+        )
+
+        digest = hashlib.sha256(
+            json.dumps(
+                case,
+                sort_keys=True,
+                separators=(',', ':'),
+            ).encode()
+        ).hexdigest()
+
+        filename = (
+            f'{_slug("_".join(gates))}'
+            f'--{digest}.json'
+        )
+
+        return self.directory / filename
 
     @contextmanager
     def _lock(self, path, *, exclusive):
