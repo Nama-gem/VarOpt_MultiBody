@@ -13,13 +13,22 @@ from functions import ConstructSquareArray, OptimizationResultStore
 # Settings
 # ============================================================
 
-MAX_LAYERS = 5
+LX = 4
+LY = 4
+
+RB_VALUES = [
+    1.5,
+    2.0,
+    2.5,
+]
 
 OMEGA_DELTA_RATIOS = [
     (1, 2),
     (1, 3),
     (1, 10),
 ]
+
+MAX_LAYERS = 5
 
 N_INITIAL_CONDITIONS = 50
 LHS_SEED_BASE = None
@@ -35,6 +44,23 @@ options = {
 }
 
 save_best = True
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def format_float_for_path(x):
+    """
+    Convert e.g.
+        1.5 -> '1p5'
+        2.0 -> '2'
+        2.5 -> '2p5'
+    """
+    if float(x).is_integer():
+        return str(int(x))
+
+    return str(x).replace(".", "p")
 
 
 # ============================================================
@@ -90,7 +116,10 @@ def sample_lhs(bounds, n_samples, seed=None):
     lower = bounds[:, 0]
     upper = bounds[:, 1]
 
-    sampler = qmc.LatinHypercube(d=len(bounds), seed=seed, )
+    sampler = qmc.LatinHypercube(
+        d=len(bounds),
+        seed=seed,
+    )
 
     samples = sampler.random(n=n_samples)
 
@@ -114,7 +143,7 @@ def get_single_pulse_min_time(
 ):
     """
     Calculate the optimal duration of a single Iz_echo pulse
-    once and cache it in the result directory.
+    once and cache it in the corresponding parameter directory.
     """
 
     store_dir = Path(store.directory)
@@ -168,15 +197,26 @@ def get_single_pulse_min_time(
 
 def decode_task_id(task_id):
     """
-    Mapping:
+    Task ordering:
 
-      task 0-4   -> Omega/Delta = 1/2,  layers 1-5
-      task 5-9   -> Omega/Delta = 1/3,  layers 1-5
-      task 10-14 -> Omega/Delta = 1/10, layers 1-5
+    For each Rb:
+        for each Omega/Delta:
+            layers 1,...,MAX_LAYERS
+
+    With:
+        3 Rb values
+        3 Omega/Delta values
+        5 layers
+
+    total = 45 tasks
     """
 
+    n_rb = len(RB_VALUES)
+    n_ratios = len(OMEGA_DELTA_RATIOS)
+
     n_tasks = (
-        len(OMEGA_DELTA_RATIOS)
+        n_rb
+        * n_ratios
         * MAX_LAYERS
     )
 
@@ -186,8 +226,20 @@ def decode_task_id(task_id):
             f"got {task_id}"
         )
 
-    ratio_index = task_id // MAX_LAYERS
-    n_layers = task_id % MAX_LAYERS + 1
+    tasks_per_rb = (
+        n_ratios
+        * MAX_LAYERS
+    )
+
+    rb_index = task_id // tasks_per_rb
+
+    remainder = task_id % tasks_per_rb
+
+    ratio_index = remainder // MAX_LAYERS
+
+    n_layers = remainder % MAX_LAYERS + 1
+
+    Rb = RB_VALUES[rb_index]
 
     numerator, denominator = (
         OMEGA_DELTA_RATIOS[ratio_index]
@@ -196,6 +248,7 @@ def decode_task_id(task_id):
     omega_over_delta = numerator / denominator
 
     return (
+        Rb,
         numerator,
         denominator,
         omega_over_delta,
@@ -221,6 +274,7 @@ def main():
     )
 
     (
+        Rb,
         numerator,
         denominator,
         omega_over_delta,
@@ -228,13 +282,15 @@ def main():
     ) = decode_task_id(task_id)
 
     print("=" * 60)
-    print(f"Task ID        : {task_id}")
+    print(f"Task ID         : {task_id}")
+    print(f"Geometry        : {LX}x{LY}")
+    print(f"Rb              : {Rb}")
     print(
-        f"Omega / Delta  : "
+        f"Omega / Delta   : "
         f"{numerator}/{denominator} "
         f"= {omega_over_delta}"
     )
-    print(f"Number layers  : {n_layers}")
+    print(f"Number layers   : {n_layers}")
     print("=" * 60)
 
 
@@ -242,9 +298,7 @@ def main():
     # Physical parameters
     # --------------------------------------------------------
 
-    # Work in units Delta = 1
     Delta = 1.0
-
     Omega = omega_over_delta * Delta
 
     print(f"Delta           : {Delta}")
@@ -252,33 +306,37 @@ def main():
 
 
     # --------------------------------------------------------
-    # Construct your array
-    # --------------------------------------------------------
-    #
-    # Replace this part with your actual Array construction.
-    #
-    # For example:
-    #
-    # arr = Array(
-    #     ...,
-    #     Omega=Omega,
-    #     Delta=Delta,
-    # )
-    #
+    # Construct array
     # --------------------------------------------------------
 
     arr = ConstructSquareArray(
-    Lx=4, Ly=4, Rb=2, Omega=0.5, n=6,
-    boundary="open", backend="quspin", use_reflections=True,
-)
+        Lx=LX,
+        Ly=LY,
+        Rb=Rb,
+        Omega=Omega,
+        n=6,
+        boundary="open",
+        backend="quspin",
+        use_reflections=True,
+    )
 
 
     # --------------------------------------------------------
     # Results directories
     # --------------------------------------------------------
 
+    geometry_dir = (
+        Path("results_Ising")
+        / f"{LX}x{LY}"
+    )
+
+    rb_dir = (
+        geometry_dir
+        / f"Rb_{format_float_for_path(Rb)}"
+    )
+
     ratio_dir = (
-        Path("results")
+        rb_dir
         / f"OmegaDelta_{numerator}_{denominator}"
     )
 
@@ -292,21 +350,22 @@ def main():
         exist_ok=True,
     )
 
+    print()
+    print("Results directory:")
+    print(layer_dir.resolve())
+
 
     # --------------------------------------------------------
     # Result stores
     # --------------------------------------------------------
-    #
-    # The single-pulse result depends only on Omega/Delta,
-    # not on the number of layers.
-    #
-    # Therefore we keep it in ratio_dir rather than layer_dir.
-    # --------------------------------------------------------
 
+    # Single-pulse minimum depends on geometry, Rb and Omega/Delta,
+    # but not on the number of layers.
     single_pulse_store = OptimizationResultStore(
         directory=ratio_dir
     )
 
+    # Layer-specific optimizations go here.
     store = OptimizationResultStore(
         directory=layer_dir
     )
@@ -360,8 +419,10 @@ def main():
     # Latin-hypercube initial conditions
     # --------------------------------------------------------
 
-    # Different deterministic seed for every Slurm task
-    seed = None
+    if LHS_SEED_BASE is None:
+        seed = None
+    else:
+        seed = LHS_SEED_BASE + task_id
 
     initial_conditions = sample_lhs(
         bounds=bounds,
@@ -419,6 +480,32 @@ def main():
 
 
     # --------------------------------------------------------
+    # Save compact summary
+    # --------------------------------------------------------
+
+    summary_file = (
+        layer_dir
+        / "summary.npz"
+    )
+
+    np.savez(
+        summary_file,
+        task_id=task_id,
+        Lx=LX,
+        Ly=LY,
+        Rb=Rb,
+        numerator=numerator,
+        denominator=denominator,
+        omega_over_delta=omega_over_delta,
+        n_layers=n_layers,
+        best_fun=best_result.fun,
+        best_x=best_result.x,
+        single_pulse_min_time=single_pulse_min_time,
+        ub_Ising=ub_Ising,
+    )
+
+
+    # --------------------------------------------------------
     # Summary
     # --------------------------------------------------------
 
@@ -428,17 +515,27 @@ def main():
     print("=" * 60)
 
     print(
-        f"Omega / Delta : "
+        f"Geometry       : "
+        f"{LX}x{LY}"
+    )
+
+    print(
+        f"Rb             : "
+        f"{Rb}"
+    )
+
+    print(
+        f"Omega / Delta  : "
         f"{numerator}/{denominator}"
     )
 
     print(
-        f"Layers        : "
+        f"Layers         : "
         f"{n_layers}"
     )
 
     print(
-        f"Best objective: "
+        f"Best objective : "
         f"{best_result.fun}"
     )
 
@@ -448,6 +545,11 @@ def main():
 
     print(
         best_result.x
+    )
+
+    print(
+        f"Summary saved  : "
+        f"{summary_file.resolve()}"
     )
 
 
