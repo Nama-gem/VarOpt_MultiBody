@@ -30,11 +30,14 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 50
+N_INITIAL_CONDITIONS = 1000
 LHS_SEED_BASE = None
 
-method = "L-BFGS-B"
-use_hessian = False
+#method = "L-BFGS-B"
+# use_hessian = False
+
+method = "trust-constr"
+use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -390,7 +393,7 @@ def main():
     # Ising interaction upper bound
     # --------------------------------------------------------
 
-    ub_Ising = 3 * single_pulse_min_time
+    ub_Ising = 1.5 * single_pulse_min_time
 
     print(
         f"Upper Ising bound: {ub_Ising}"
