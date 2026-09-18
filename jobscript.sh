@@ -3,7 +3,7 @@
 #SBATCH --job-name=varopt_multibody
 #SBATCH --partition=jila
 #SBATCH --qos=long
-#SBATCH --array=0-14
+#SBATCH --array=0-44
 #SBATCH --time=7-00:00:00
 #SBATCH --mem=4G
 #SBATCH --cpus-per-task=1
