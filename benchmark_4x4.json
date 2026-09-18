@@ -1,0 +1,114 @@
+[
+  {
+    "boundary": "open",
+    "backend": "quspin",
+    "dimensions": [
+      4,
+      4
+    ],
+    "n": 3,
+    "Rb": 1.5,
+    "Omega": 0.5,
+    "reduced_dim": 16576,
+    "full_dim": 65536,
+    "construction_seconds": 1.0356185829732567,
+    "hessian_evaluation_seconds": 0.0842390829930082,
+    "method": "L-BFGS-B",
+    "seconds": 2.145078583038412,
+    "xi": 0.7212923391355016,
+    "success": true,
+    "nit": 37,
+    "nfev": 49,
+    "nhev": 0,
+    "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+    "theta": [
+      110.04049116722817,
+      0.8366229572732586,
+      200.0
+    ]
+  },
+  {
+    "boundary": "open",
+    "backend": "quspin",
+    "dimensions": [
+      4,
+      4
+    ],
+    "n": 3,
+    "Rb": 1.5,
+    "Omega": 0.5,
+    "reduced_dim": 16576,
+    "full_dim": 65536,
+    "construction_seconds": 1.0356185829732567,
+    "hessian_evaluation_seconds": 0.0842390829930082,
+    "method": "trust-constr",
+    "seconds": 2.967685707961209,
+    "xi": 0.7231922645399189,
+    "success": true,
+    "nit": 23,
+    "nfev": 13,
+    "nhev": 12,
+    "message": "`gtol` termination condition is satisfied.",
+    "theta": [
+      130.67732184681955,
+      3.141270904298723,
+      127.19611997211686
+    ]
+  },
+  {
+    "boundary": "periodic",
+    "backend": "quspin",
+    "dimensions": [
+      4,
+      4
+    ],
+    "n": 3,
+    "Rb": 1.5,
+    "Omega": 0.5,
+    "reduced_dim": 16576,
+    "full_dim": 65536,
+    "construction_seconds": 0.12252650002483279,
+    "hessian_evaluation_seconds": 0.08268995792604983,
+    "method": "L-BFGS-B",
+    "seconds": 1.0818956249859184,
+    "xi": 0.9060162636049773,
+    "success": true,
+    "nit": 16,
+    "nfev": 20,
+    "nhev": 0,
+    "message": "CONVERGENCE: NORM OF PROJECTED GRADIENT <= PGTOL",
+    "theta": [
+      200.0,
+      -1.0202935620119027,
+      200.0
+    ]
+  },
+  {
+    "boundary": "periodic",
+    "backend": "quspin",
+    "dimensions": [
+      4,
+      4
+    ],
+    "n": 3,
+    "Rb": 1.5,
+    "Omega": 0.5,
+    "reduced_dim": 16576,
+    "full_dim": 65536,
+    "construction_seconds": 0.12252650002483279,
+    "hessian_evaluation_seconds": 0.08268995792604983,
+    "method": "trust-constr",
+    "seconds": 2.7514718329766765,
+    "xi": 0.9060245541351929,
+    "success": true,
+    "nit": 29,
+    "nfev": 28,
+    "nhev": 18,
+    "message": "`gtol` termination condition is satisfied.",
+    "theta": [
+      199.98976146232098,
+      -1.0202657877947348,
+      199.97040510740754
+    ]
+  }
+]
