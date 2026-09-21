@@ -36,11 +36,11 @@ LHS_SEED_BASE = None
 # method = "L-BFGS-B"
 # use_hessian = False
 
-method = "SLSQP"
-use_hessian = False
+# method = "SLSQP"
+# use_hessian = False
 
-# method = "trust-constr"
-# use_hessian = True
+method = "trust-constr"
+use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -112,7 +112,7 @@ WARM_START_INCLUDE_LHS = True
 # Rx angles remain unchanged.
 #
 # If False, the old parameters are copied directly.
-WARM_START_RESCALE_ISING = True
+WARM_START_RESCALE_ISING = False
 
 
 # ============================================================
