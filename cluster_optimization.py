@@ -906,118 +906,6 @@ def main():
 
     initial_conditions = []
 
-
-    # --------------------------------------------------------
-    # Warm-start initial condition
-    # --------------------------------------------------------
-
-    if USE_WARM_START:
-
-        (
-            source_numerator,
-            source_denominator,
-        ) = WARM_START_OMEGA_DELTA
-
-        source_ratio_dir = (
-            parameter_directory(
-                base_dir=results_base_dir,
-                Lx=LX,
-                Ly=LY,
-                Rb=WARM_START_RB,
-                numerator=source_numerator,
-                denominator=source_denominator,
-            )
-        )
-
-        warm_start = (
-            load_warm_start(
-                source_ratio_dir=source_ratio_dir,
-                n_layers=n_layers,
-                target_sequence=sequence,
-                target_bounds=bounds,
-                target_single_pulse_min_time=(
-                    single_pulse_min_time
-                ),
-                rescale_ising=(
-                    WARM_START_RESCALE_ISING
-                ),
-            )
-        )
-
-        initial_conditions.append(
-            warm_start
-        )
-
-
-    # --------------------------------------------------------
-    # Latin-hypercube initial conditions
-    # --------------------------------------------------------
-
-    use_lhs = (
-        not USE_WARM_START
-        or WARM_START_INCLUDE_LHS
-    )
-
-    if use_lhs:
-
-        if LHS_SEED_BASE is None:
-
-            seed = None
-
-        else:
-
-            seed = (
-                LHS_SEED_BASE
-                + task_id
-            )
-
-        lhs_conditions = (
-            sample_lhs(
-                bounds=bounds,
-                n_samples=N_INITIAL_CONDITIONS,
-                seed=seed,
-            )
-        )
-
-        initial_conditions.extend(
-            lhs_conditions
-        )
-
-
-    # --------------------------------------------------------
-    # Convert to array
-    # --------------------------------------------------------
-
-    initial_conditions = (
-        np.asarray(
-            initial_conditions,
-            dtype=float,
-        )
-    )
-
-    if len(
-        initial_conditions
-    ) == 0:
-
-        raise RuntimeError(
-            "No initial conditions were generated."
-        )
-
-
-    # --------------------------------------------------------
-    # Initial-condition summary
-    # --------------------------------------------------------
-
-    print()
-    print("=" * 60)
-    print("INITIAL CONDITIONS")
-    print("=" * 60)
-
-    print(
-        "Total initial conditions:",
-        len(initial_conditions),
-    )
-
     # --------------------------------------------------------
     # Warm-start initial conditions
     # --------------------------------------------------------
@@ -1109,6 +997,97 @@ def main():
 
                 n_warm_starts += 1
 
+
+    # --------------------------------------------------------
+    # Latin-hypercube initial conditions
+    # --------------------------------------------------------
+
+    use_lhs = (
+        not USE_WARM_START
+        or WARM_START_INCLUDE_LHS
+    )
+
+    if use_lhs:
+
+        if LHS_SEED_BASE is None:
+
+            seed = None
+
+        else:
+
+            seed = (
+                LHS_SEED_BASE
+                + task_id
+            )
+
+        lhs_conditions = (
+            sample_lhs(
+                bounds=bounds,
+                n_samples=N_INITIAL_CONDITIONS,
+                seed=seed,
+            )
+        )
+
+        initial_conditions.extend(
+            lhs_conditions
+        )
+
+
+    # --------------------------------------------------------
+    # Convert to array
+    # --------------------------------------------------------
+
+    initial_conditions = (
+        np.asarray(
+            initial_conditions,
+            dtype=float,
+        )
+    )
+
+    if len(
+        initial_conditions
+    ) == 0:
+
+        raise RuntimeError(
+            "No initial conditions were generated."
+        )
+
+
+    # --------------------------------------------------------
+    # Initial-condition summary
+    # --------------------------------------------------------
+
+    print()
+    print("=" * 60)
+    print("INITIAL CONDITIONS")
+    print("=" * 60)
+
+    print(
+        "Total initial conditions:",
+        len(initial_conditions),
+    )
+
+    if USE_WARM_START:
+        print(
+            "Warm-start conditions:",
+            n_warm_starts,
+        )
+
+        print(
+            "Warm-start Rb values:",
+            WARM_START_RB_VALUES,
+        )
+
+        print(
+            "Warm-start Omega/Delta ratios:",
+            WARM_START_OMEGA_DELTA_RATIOS,
+        )
+
+        print(
+            "Rescale Ising times:",
+            WARM_START_RESCALE_ISING,
+        )
+
     # ========================================================
     # Run optimizations
     # ========================================================
@@ -1133,8 +1112,8 @@ def main():
         )
 
         if (
-            USE_WARM_START
-            and i == 0
+                USE_WARM_START
+                and i < n_warm_starts
         ):
 
             print(
