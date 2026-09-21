@@ -30,10 +30,10 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1000
+N_INITIAL_CONDITIONS = 100
 LHS_SEED_BASE = None
 
-method = "L-BFGS-B"
+method = "SLSQP"
 use_hessian = False
 
 # method = "trust-constr"
