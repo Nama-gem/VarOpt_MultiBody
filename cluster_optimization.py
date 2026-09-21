@@ -1018,45 +1018,96 @@ def main():
         len(initial_conditions),
     )
 
+    # --------------------------------------------------------
+    # Warm-start initial conditions
+    # --------------------------------------------------------
+
+    n_warm_starts = 0
+
     if USE_WARM_START:
 
-        print(
-            "Warm-start conditions:",
-            1,
-        )
+        for source_Rb in WARM_START_RB_VALUES:
 
-        print(
-            "Warm-start Rb:",
-            WARM_START_RB,
-        )
+            for (
+                    source_numerator,
+                    source_denominator,
+            ) in WARM_START_OMEGA_DELTA_RATIOS:
 
-        print(
-            "Warm-start Omega/Delta:",
-            f"{WARM_START_OMEGA_DELTA[0]}"
-            f"/{WARM_START_OMEGA_DELTA[1]}",
-        )
+                # Skip the target point itself
+                if (
+                        np.isclose(source_Rb, Rb)
+                        and source_numerator == numerator
+                        and source_denominator == denominator
+                ):
+                    print()
+                    print(
+                        "Skipping warm start from target point itself:"
+                    )
+                    print(
+                        f"Rb = {source_Rb}, "
+                        f"Omega/Delta = "
+                        f"{source_numerator}/{source_denominator}"
+                    )
+                    continue
 
-        print(
-            "Rescale Ising times:",
-            WARM_START_RESCALE_ISING,
-        )
+                source_ratio_dir = (
+                    parameter_directory(
+                        base_dir=results_base_dir,
+                        Lx=LX,
+                        Ly=LY,
+                        Rb=source_Rb,
+                        numerator=source_numerator,
+                        denominator=source_denominator,
+                    )
+                )
 
-    if use_lhs:
+                source_summary_file = (
+                        source_ratio_dir
+                        / f"layers_{n_layers}"
+                        / "summary.npz"
+                )
 
-        print(
-            "LHS conditions:",
-            N_INITIAL_CONDITIONS,
-        )
+                # If no optimization exists for this source point,
+                # simply skip it.
+                if not source_summary_file.exists():
+                    print()
+                    print(
+                        "Skipping missing warm-start source:"
+                    )
 
-    else:
+                    print(
+                        f"Rb = {source_Rb}, "
+                        f"Omega/Delta = "
+                        f"{source_numerator}/{source_denominator}"
+                    )
 
-        print(
-            "LHS conditions:",
-            0,
-        )
+                    print(
+                        f"Missing file: "
+                        f"{source_summary_file.resolve()}"
+                    )
 
-    print("=" * 60)
+                    continue
 
+                warm_start = (
+                    load_warm_start(
+                        source_ratio_dir=source_ratio_dir,
+                        n_layers=n_layers,
+                        target_sequence=sequence,
+                        target_bounds=bounds,
+                        target_single_pulse_min_time=(
+                            single_pulse_min_time
+                        ),
+                        rescale_ising=(
+                            WARM_START_RESCALE_ISING
+                        ),
+                    )
+                )
+
+                initial_conditions.append(
+                    warm_start
+                )
+
+                n_warm_starts += 1
 
     # ========================================================
     # Run optimizations
