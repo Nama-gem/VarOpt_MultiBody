@@ -33,14 +33,14 @@ MAX_LAYERS = 5
 N_INITIAL_CONDITIONS = 3
 LHS_SEED_BASE = None
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
