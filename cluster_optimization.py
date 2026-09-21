@@ -30,7 +30,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1
+N_INITIAL_CONDITIONS = 1000
 LHS_SEED_BASE = None
 
 method = "L-BFGS-B"
@@ -100,7 +100,7 @@ WARM_START_OMEGA_DELTA_RATIOS = [
 #     only the warm-start optimum
 #
 # is optimized.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations:
@@ -112,7 +112,7 @@ WARM_START_INCLUDE_LHS = False
 # Rx angles remain unchanged.
 #
 # If False, the old parameters are copied directly.
-WARM_START_RESCALE_ISING = False
+WARM_START_RESCALE_ISING = True
 
 
 # ============================================================
@@ -860,7 +860,7 @@ def main():
     # --------------------------------------------------------
 
     ub_Ising = (
-        2
+        1.5
         * single_pulse_min_time
     )
 
