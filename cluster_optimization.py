@@ -27,6 +27,7 @@ RB_VALUES = [
 OMEGA_DELTA_RATIOS = [
     (1, 2),
     (1, 3),
+    (1, 5),
     (1, 10),
 ]
 
@@ -43,11 +44,11 @@ LHS_SEED_BASE = None
 # method = "L-BFGS-B"
 # use_hessian = False
 
-method = "SLSQP"
-use_hessian = False
+# method = "SLSQP"
+# use_hessian = False
 
-# method = "trust-constr"
-# use_hessian = True
+method = "trust-constr"
+use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -242,6 +243,7 @@ WARM_START_RB_VALUES = [
 WARM_START_OMEGA_DELTA_RATIOS = [
     (1, 2),
     (1, 3),
+    (1, 5),
     (1, 10),
 ]
 
@@ -262,7 +264,7 @@ WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
-WARM_START_RESCALE_ISING = True
+WARM_START_RESCALE_ISING = False
 
 
 # ============================================================
