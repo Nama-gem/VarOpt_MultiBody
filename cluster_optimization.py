@@ -425,18 +425,18 @@ def get_single_pulse_min_time(
         / "single_pulse_min_time.npy"
     )
 
-    if cache_file.exists():
-
-        single_pulse_min_time = float(
-            np.load(cache_file)
-        )
-
-        print(
-            "Loaded single-pulse minimum time:",
-            single_pulse_min_time,
-        )
-
-        return single_pulse_min_time
+    # if cache_file.exists():
+    #
+    #     single_pulse_min_time = float(
+    #         np.load(cache_file)
+    #     )
+    #
+    #     print(
+    #         "Loaded single-pulse minimum time:",
+    #         single_pulse_min_time,
+    #     )
+    #
+    #     return single_pulse_min_time
 
     print(
         "Optimizing single Iz_echo pulse..."
@@ -449,11 +449,11 @@ def get_single_pulse_min_time(
     result = arr.optimize(
         ["Iz_echo"],
         1,
-        method=method,
-        hessian=use_hessian,
+        method='L-BFGS-B',
+        hessian=False,
         gradient=OPTIMIZER_GRADIENT,
         bounds=[
-            (0, 1e4)
+            (0, 1e5)
         ],
         options=options,
         results_dir=store.directory,
@@ -981,7 +981,7 @@ def main():
     # --------------------------------------------------------
 
     ub_Ising = (
-        1.5
+        2
         * single_pulse_min_time
     )
 
