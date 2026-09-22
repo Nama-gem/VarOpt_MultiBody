@@ -5,7 +5,7 @@
 #SBATCH --qos=long
 #SBATCH --array=0-44
 #SBATCH --time=7-00:00:00
-#SBATCH --mem=4G
+#SBATCH --mem=6G
 #SBATCH --cpus-per-task=1
 
 #SBATCH --output=/users/rey/raka3858/VarOpt_MultiBody/output/out-%x.%A_%a.out

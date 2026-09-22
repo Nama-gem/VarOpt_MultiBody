@@ -1,6 +1,8 @@
 # cluster_optimization.py
 
 import os
+import gc
+import ctypes
 from pathlib import Path
 
 import numpy as np
@@ -33,6 +35,11 @@ MAX_LAYERS = 5
 N_INITIAL_CONDITIONS = 1000
 LHS_SEED_BASE = None
 
+
+# ------------------------------------------------------------
+# Optimizer
+# ------------------------------------------------------------
+
 # method = "L-BFGS-B"
 # use_hessian = False
 
@@ -49,6 +56,174 @@ options = {
 save_best = True
 
 
+# ------------------------------------------------------------
+# Gradient diagnostic
+# ------------------------------------------------------------
+
+# None:
+#     Preserve the normal behavior of ConstructSquareArray.optimize().
+#     For SLSQP this means analytic gradients are used.
+#
+# False:
+#     Diagnostic mode in which SciPy estimates the gradient numerically.
+#     This avoids propagating all derivative states simultaneously.
+#
+# Normally leave this as None.
+OPTIMIZER_GRADIENT = None
+
+
+# ============================================================
+# Memory diagnostics
+# ============================================================
+
+MEMORY_DIAGNOSTICS = True
+
+# Run Python garbage collection after every optimization.
+RUN_GC = True
+
+# On Linux/Terra, ask glibc to return unused heap memory to
+# the operating system after each completed optimization.
+#
+# This is useful diagnostically. If VmRSS falls substantially
+# after malloc_trim(), the memory was free internally but had
+# not been returned to the OS.
+RUN_MALLOC_TRIM = True
+
+
+def get_linux_memory():
+    """
+    Return Linux process memory information in MB.
+
+    VmRSS:
+        Current resident memory.
+
+    VmHWM:
+        Peak resident memory ("high water mark") reached by
+        this process so far.
+
+    VmSize:
+        Current virtual memory size.
+
+    Returns NaN values on systems without /proc/self/status.
+    """
+
+    result = {
+        "VmRSS": np.nan,
+        "VmHWM": np.nan,
+        "VmSize": np.nan,
+    }
+
+    status_file = Path("/proc/self/status")
+
+    if not status_file.exists():
+        return result
+
+    with status_file.open() as f:
+
+        for line in f:
+
+            for key in result:
+
+                if line.startswith(key + ":"):
+
+                    # /proc reports values in kB.
+                    value_kb = float(
+                        line.split()[1]
+                    )
+
+                    result[key] = (
+                        value_kb / 1024.0
+                    )
+
+    return result
+
+
+def print_memory(label):
+    """
+    Print current and peak process memory.
+    """
+
+    if not MEMORY_DIAGNOSTICS:
+        return
+
+    memory = get_linux_memory()
+
+    print()
+    print(
+        f"[MEMORY] {label}"
+    )
+
+    print(
+        f"    VmRSS  = "
+        f"{memory['VmRSS']:.1f} MB"
+    )
+
+    print(
+        f"    VmHWM  = "
+        f"{memory['VmHWM']:.1f} MB"
+    )
+
+    print(
+        f"    VmSize = "
+        f"{memory['VmSize']:.1f} MB"
+    )
+
+
+def run_garbage_collection():
+    """
+    Run Python garbage collection and report the number of
+    unreachable objects collected.
+    """
+
+    if not RUN_GC:
+        return
+
+    n_collected = gc.collect()
+
+    if MEMORY_DIAGNOSTICS:
+
+        print(
+            f"[MEMORY] gc.collect() collected "
+            f"{n_collected} objects"
+        )
+
+
+def run_malloc_trim():
+    """
+    Ask glibc to return unused heap memory to the operating
+    system.
+
+    This works on Linux systems using glibc, including typical
+    HPC environments. If unavailable, silently continue.
+    """
+
+    if not RUN_MALLOC_TRIM:
+        return
+
+    try:
+
+        libc = ctypes.CDLL(
+            "libc.so.6"
+        )
+
+        libc.malloc_trim(0)
+
+        if MEMORY_DIAGNOSTICS:
+
+            print(
+                "[MEMORY] malloc_trim(0) called"
+            )
+
+    except Exception as exc:
+
+        if MEMORY_DIAGNOSTICS:
+
+            print(
+                "[MEMORY] malloc_trim unavailable:",
+                repr(exc),
+            )
+
+
 # ============================================================
 # Warm-start settings
 # ============================================================
@@ -57,23 +232,6 @@ save_best = True
 # Latin-hypercube initial conditions.
 USE_WARM_START = True
 
-
-# Source point from which the current optimum should be loaded.
-#
-# Example:
-#
-#     WARM_START_RB = 2.0
-#     WARM_START_OMEGA_DELTA = (1, 3)
-#
-# loads from
-#
-# results_Ising/
-#     4x4/
-#         Rb_2/
-#             OmegaDelta_1_3/
-#                 layers_N/
-#                     summary.npz
-#
 
 WARM_START_RB_VALUES = [
     1.5,
@@ -103,15 +261,7 @@ WARM_START_OMEGA_DELTA_RATIOS = [
 WARM_START_INCLUDE_LHS = True
 
 
-# If True, rescale only Iz_echo and Ix_echo durations:
-#
-#       t_target
-#       -------- = target single-pulse minimum time
-#       t_source   source single-pulse minimum time
-#
-# Rx angles remain unchanged.
-#
-# If False, the old parameters are copied directly.
+# If True, rescale only Iz_echo and Ix_echo durations.
 WARM_START_RESCALE_ISING = True
 
 
@@ -120,18 +270,17 @@ WARM_START_RESCALE_ISING = True
 # ============================================================
 
 def format_float_for_path(x):
-    """
-    Convert e.g.
-
-        1.5 -> '1p5'
-        2.0 -> '2'
-        2.5 -> '2p5'
-    """
 
     if float(x).is_integer():
-        return str(int(x))
 
-    return str(x).replace(".", "p")
+        return str(
+            int(x)
+        )
+
+    return str(x).replace(
+        ".",
+        "p",
+    )
 
 
 def parameter_directory(
@@ -142,13 +291,6 @@ def parameter_directory(
     numerator,
     denominator,
 ):
-    """
-    Return the result directory corresponding to
-
-        geometry
-        Rb
-        Omega / Delta
-    """
 
     return (
         Path(base_dir)
@@ -162,9 +304,6 @@ def project_to_bounds(
     x,
     bounds,
 ):
-    """
-    Project a parameter vector onto the optimization bounds.
-    """
 
     x = np.asarray(
         x,
@@ -191,25 +330,20 @@ def gate_sequence(
     n_layers,
     ub_Ising,
 ):
-    """
-    Generate
-
-        Iz_echo, Ix_echo,
-        Rx, Iz_echo, Ix_echo,
-        Rx, Iz_echo, Ix_echo,
-        ...
-
-    Each layer contains Iz_echo and Ix_echo.
-    Every layer except the first is preceded by Rx.
-    """
 
     sequence = []
     bounds = []
 
-    for layer in range(n_layers):
+    for layer in range(
+        n_layers
+    ):
 
         if layer > 0:
-            sequence.append("Rx")
+
+            sequence.append(
+                "Rx"
+            )
+
             bounds.append(
                 (-np.pi, np.pi)
             )
@@ -236,9 +370,6 @@ def sample_lhs(
     n_samples,
     seed=None,
 ):
-    """
-    Generate Latin-hypercube initial conditions within bounds.
-    """
 
     bounds = np.asarray(
         bounds,
@@ -275,10 +406,6 @@ def get_single_pulse_min_time(
     use_hessian,
     options,
 ):
-    """
-    Calculate the optimal duration of a single Iz_echo pulse
-    once and cache it in the corresponding parameter directory.
-    """
 
     store_dir = Path(
         store.directory
@@ -311,11 +438,16 @@ def get_single_pulse_min_time(
         "Optimizing single Iz_echo pulse..."
     )
 
+    print_memory(
+        "before single-pulse optimization"
+    )
+
     result = arr.optimize(
         ["Iz_echo"],
         1,
         method=method,
         hessian=use_hessian,
+        gradient=OPTIMIZER_GRADIENT,
         bounds=[
             (0, 1e4)
         ],
@@ -323,8 +455,26 @@ def get_single_pulse_min_time(
         results_dir=store.directory,
     )
 
+    print_memory(
+        "after single-pulse optimization"
+    )
+
     single_pulse_min_time = float(
         result.x[0]
+    )
+
+    del result
+
+    run_garbage_collection()
+
+    print_memory(
+        "after gc following single-pulse optimization"
+    )
+
+    run_malloc_trim()
+
+    print_memory(
+        "after malloc_trim following single-pulse optimization"
     )
 
     np.save(
@@ -352,26 +502,6 @@ def load_warm_start(
     target_single_pulse_min_time,
     rescale_ising=True,
 ):
-    """
-    Load the current optimum from another Rb / Omega-Delta point.
-
-    Expected source:
-
-        source_ratio_dir/
-            layers_N/
-                summary.npz
-
-    The number of layers must match the current optimization.
-
-    If rescale_ising=True, only Iz_echo and Ix_echo parameters
-    are rescaled according to
-
-        t_new = t_old
-                * target_single_pulse_min_time
-                / source_single_pulse_min_time
-
-    Rx parameters are unchanged.
-    """
 
     source_layer_dir = (
         Path(source_ratio_dir)
@@ -469,11 +599,6 @@ def load_warm_start(
         f"{target_single_pulse_min_time}"
     )
 
-
-    # --------------------------------------------------------
-    # Check dimensionality
-    # --------------------------------------------------------
-
     if len(x0) != len(
         target_sequence
     ):
@@ -485,11 +610,6 @@ def load_warm_start(
             f"Target parameters : "
             f"{len(target_sequence)}\n"
         )
-
-
-    # --------------------------------------------------------
-    # Optional Ising-time rescaling
-    # --------------------------------------------------------
 
     if rescale_ising:
 
@@ -522,11 +642,6 @@ def load_warm_start(
             "Ising-time rescaling disabled."
         )
 
-
-    # --------------------------------------------------------
-    # Enforce target bounds
-    # --------------------------------------------------------
-
     x0_before_projection = (
         x0.copy()
     )
@@ -550,11 +665,6 @@ def load_warm_start(
             "Warm-start parameters were "
             "projected onto target bounds."
         )
-
-
-    # --------------------------------------------------------
-    # Print warm start
-    # --------------------------------------------------------
 
     print()
     print(
@@ -589,19 +699,6 @@ def load_warm_start(
 def decode_task_id(
     task_id,
 ):
-    """
-    Task ordering:
-
-    For each Rb:
-        for each Omega/Delta:
-            layers 1,...,MAX_LAYERS
-
-    Total:
-
-        len(RB_VALUES)
-        * len(OMEGA_DELTA_RATIOS)
-        * MAX_LAYERS
-    """
 
     n_rb = len(
         RB_VALUES
@@ -683,10 +780,6 @@ def decode_task_id(
 
 def main():
 
-    # --------------------------------------------------------
-    # Slurm task ID
-    # --------------------------------------------------------
-
     task_id = int(
         os.environ.get(
             "SLURM_ARRAY_TASK_ID",
@@ -737,7 +830,31 @@ def main():
         f"{USE_WARM_START}"
     )
 
+    print(
+        f"Optimizer       : "
+        f"{method}"
+    )
+
+    print(
+        f"Gradient setting: "
+        f"{OPTIMIZER_GRADIENT}"
+    )
+
+    print(
+        f"Memory checks   : "
+        f"{MEMORY_DIAGNOSTICS}"
+    )
+
+    print(
+        f"malloc_trim     : "
+        f"{RUN_MALLOC_TRIM}"
+    )
+
     print("=" * 60)
+
+    print_memory(
+        "at start of main()"
+    )
 
 
     # --------------------------------------------------------
@@ -766,6 +883,10 @@ def main():
     # Construct array
     # --------------------------------------------------------
 
+    print_memory(
+        "immediately before ConstructSquareArray"
+    )
+
     arr = ConstructSquareArray(
         Lx=LX,
         Ly=LY,
@@ -777,6 +898,10 @@ def main():
         use_reflections=True,
     )
 
+    print_memory(
+        "immediately after ConstructSquareArray"
+    )
+
 
     # --------------------------------------------------------
     # Results directories
@@ -784,11 +909,6 @@ def main():
 
     results_base_dir = Path(
         "results_Ising"
-    )
-
-    geometry_dir = (
-        results_base_dir
-        / f"{LX}x{LY}"
     )
 
     ratio_dir = (
@@ -826,15 +946,12 @@ def main():
     # Result stores
     # --------------------------------------------------------
 
-    # Single-pulse minimum depends on geometry, Rb and
-    # Omega/Delta, but not on the number of layers.
     single_pulse_store = (
         OptimizationResultStore(
             directory=ratio_dir
         )
     )
 
-    # Layer-specific optimizations go here.
     store = OptimizationResultStore(
         directory=layer_dir
     )
@@ -906,10 +1023,6 @@ def main():
 
     initial_conditions = []
 
-    # --------------------------------------------------------
-    # Warm-start initial conditions
-    # --------------------------------------------------------
-
     n_warm_starts = 0
 
     if USE_WARM_START:
@@ -917,25 +1030,34 @@ def main():
         for source_Rb in WARM_START_RB_VALUES:
 
             for (
-                    source_numerator,
-                    source_denominator,
+                source_numerator,
+                source_denominator,
             ) in WARM_START_OMEGA_DELTA_RATIOS:
 
-                # Skip the target point itself
                 if (
-                        np.isclose(source_Rb, Rb)
-                        and source_numerator == numerator
-                        and source_denominator == denominator
+                    np.isclose(
+                        source_Rb,
+                        Rb,
+                    )
+                    and source_numerator
+                    == numerator
+                    and source_denominator
+                    == denominator
                 ):
+
                     print()
                     print(
-                        "Skipping warm start from target point itself:"
+                        "Skipping warm start from target "
+                        "point itself:"
                     )
+
                     print(
                         f"Rb = {source_Rb}, "
                         f"Omega/Delta = "
-                        f"{source_numerator}/{source_denominator}"
+                        f"{source_numerator}/"
+                        f"{source_denominator}"
                     )
+
                     continue
 
                 source_ratio_dir = (
@@ -950,14 +1072,13 @@ def main():
                 )
 
                 source_summary_file = (
-                        source_ratio_dir
-                        / f"layers_{n_layers}"
-                        / "summary.npz"
+                    source_ratio_dir
+                    / f"layers_{n_layers}"
+                    / "summary.npz"
                 )
 
-                # If no optimization exists for this source point,
-                # simply skip it.
                 if not source_summary_file.exists():
+
                     print()
                     print(
                         "Skipping missing warm-start source:"
@@ -966,7 +1087,8 @@ def main():
                     print(
                         f"Rb = {source_Rb}, "
                         f"Omega/Delta = "
-                        f"{source_numerator}/{source_denominator}"
+                        f"{source_numerator}/"
+                        f"{source_denominator}"
                     )
 
                     print(
@@ -1033,10 +1155,6 @@ def main():
         )
 
 
-    # --------------------------------------------------------
-    # Convert to array
-    # --------------------------------------------------------
-
     initial_conditions = (
         np.asarray(
             initial_conditions,
@@ -1068,6 +1186,7 @@ def main():
     )
 
     if USE_WARM_START:
+
         print(
             "Warm-start conditions:",
             n_warm_starts,
@@ -1088,11 +1207,19 @@ def main():
             WARM_START_RESCALE_ISING,
         )
 
+    print_memory(
+        "after generation of initial conditions"
+    )
+
+
     # ========================================================
     # Run optimizations
     # ========================================================
 
-    best_result = None
+    # Store only the quantities we actually need rather than
+    # retaining an entire scipy OptimizeResult indefinitely.
+    best_fun = np.inf
+    best_x = None
 
     n_optimizations = len(
         initial_conditions
@@ -1103,7 +1230,7 @@ def main():
     ):
 
         print()
-        print("-" * 60)
+        print("=" * 60)
 
         print(
             f"Optimization "
@@ -1112,8 +1239,8 @@ def main():
         )
 
         if (
-                USE_WARM_START
-                and i < n_warm_starts
+            USE_WARM_START
+            and i < n_warm_starts
         ):
 
             print(
@@ -1128,13 +1255,27 @@ def main():
                 "LHS"
             )
 
-        print("-" * 60)
+        print("=" * 60)
+
+        # ----------------------------------------------------
+        # MEMORY BEFORE
+        # ----------------------------------------------------
+
+        print_memory(
+            f"before optimization {i + 1}"
+        )
+
+
+        # ----------------------------------------------------
+        # OPTIMIZATION
+        # ----------------------------------------------------
 
         result = arr.optimize(
             sequence,
             x0,
             method=method,
             hessian=use_hessian,
+            gradient=OPTIMIZER_GRADIENT,
             bounds=bounds,
             options=options,
             results_dir=(
@@ -1144,23 +1285,135 @@ def main():
             ),
         )
 
-        if (
-            best_result is None
-            or result.fun
-            < best_result.fun
+
+        # ----------------------------------------------------
+        # MEMORY IMMEDIATELY AFTER
+        # ----------------------------------------------------
+
+        print_memory(
+            f"immediately after optimization {i + 1}"
+        )
+
+
+        # ----------------------------------------------------
+        # Extract only required result information
+        # ----------------------------------------------------
+
+        current_fun = float(
+            result.fun
+        )
+
+        current_x = np.array(
+            result.x,
+            dtype=float,
+            copy=True,
+        )
+
+        print(
+            f"Objective: {current_fun}"
+        )
+
+        print(
+            f"Success:   {result.success}"
+        )
+
+        print(
+            f"Message:   {result.message}"
+        )
+
+        if hasattr(
+            result,
+            "nfev",
         ):
 
-            best_result = result
+            print(
+                f"nfev:      {result.nfev}"
+            )
+
+        if hasattr(
+            result,
+            "njev",
+        ):
+
+            print(
+                f"njev:      {result.njev}"
+            )
+
+        if hasattr(
+            result,
+            "nit",
+        ):
+
+            print(
+                f"nit:       {result.nit}"
+            )
+
+
+        # ----------------------------------------------------
+        # Update best result
+        # ----------------------------------------------------
+
+        if (
+            best_x is None
+            or current_fun < best_fun
+        ):
+
+            best_fun = current_fun
+
+            best_x = current_x.copy()
 
             print(
                 "New best result:",
-                best_result.fun,
+                best_fun,
             )
+
+
+        # ----------------------------------------------------
+        # Explicitly release OptimizeResult
+        # ----------------------------------------------------
+
+        del result
+        del current_x
+
+
+        # ----------------------------------------------------
+        # Garbage collection
+        # ----------------------------------------------------
+
+        run_garbage_collection()
+
+        print_memory(
+            f"after gc.collect(), "
+            f"optimization {i + 1}"
+        )
+
+
+        # ----------------------------------------------------
+        # glibc malloc_trim
+        # ----------------------------------------------------
+
+        run_malloc_trim()
+
+        print_memory(
+            f"after malloc_trim(), "
+            f"optimization {i + 1}"
+        )
+
+
+        print(
+            "-" * 60
+        )
 
 
     # ========================================================
     # Save compact summary
     # ========================================================
+
+    if best_x is None:
+
+        raise RuntimeError(
+            "No optimization result was obtained."
+        )
 
     summary_file = (
         layer_dir
@@ -1179,8 +1432,8 @@ def main():
             omega_over_delta
         ),
         n_layers=n_layers,
-        best_fun=best_result.fun,
-        best_x=best_result.x,
+        best_fun=best_fun,
+        best_x=best_x,
         single_pulse_min_time=(
             single_pulse_min_time
         ),
@@ -1219,7 +1472,7 @@ def main():
 
     print(
         f"Best objective : "
-        f"{best_result.fun}"
+        f"{best_fun}"
     )
 
     print(
@@ -1227,12 +1480,16 @@ def main():
     )
 
     print(
-        best_result.x
+        best_x
     )
 
     print(
         f"Summary saved  : "
         f"{summary_file.resolve()}"
+    )
+
+    print_memory(
+        "at end of main()"
     )
 
 
