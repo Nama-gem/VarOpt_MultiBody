@@ -28,6 +28,7 @@ OMEGA_DELTA_RATIOS = [
     (1, 2),
     (1, 3),
     (1, 5),
+    (1, 7),
     (1, 10),
 ]
 
@@ -244,6 +245,7 @@ WARM_START_OMEGA_DELTA_RATIOS = [
     (1, 2),
     (1, 3),
     (1, 5),
+    (1, 7),
     (1, 10),
 ]
 
@@ -264,7 +266,7 @@ WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
-WARM_START_RESCALE_ISING = False
+WARM_START_RESCALE_ISING = True
 
 
 # ============================================================
