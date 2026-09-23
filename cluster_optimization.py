@@ -42,14 +42,14 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-method = "L-BFGS-B"
-use_hessian = False
+# method = "L-BFGS-B"
+# use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-# method = "trust-constr"
-# use_hessian = True
+method = "trust-constr"
+use_hessian = True
 
 options = {
     "maxiter": 1000,
