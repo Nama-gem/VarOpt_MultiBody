@@ -44,7 +44,7 @@ VarOpt_MultiBody_Ising/
   requirements-notebook.txt
 ```
 
-Start with `example_optimization.ipynb` in the main folder and select the
+Start with `example_optimization_Ising.ipynb` in the main folder and select the
 project's `.venv` Python interpreter as its notebook kernel. Run all cells in
 order. The example uses a 4x4 open array with n=3 and one bounded optimization.
 Its executed output is included; saving is disabled by default in the example.

@@ -19,7 +19,7 @@
 PROJECT_DIR="/users/rey/raka3858/VarOpt_MultiBody"
 OUTPUT_DIR="${PROJECT_DIR}/output"
 
-PYTHON_SCRIPT="${PROJECT_DIR}/cluster_optimization.py"
+PYTHON_SCRIPT="${PROJECT_DIR}/cluster_optimization_Ising.py"
 
 PYTHON="/users/rey/raka3858/.conda/envs/varopt39/bin/python"
 
