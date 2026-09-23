@@ -42,14 +42,14 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -262,7 +262,7 @@ WARM_START_OMEGA_DELTA_RATIOS = [
 #     only the warm-start optimum
 #
 # is optimized.
-WARM_START_INCLUDE_LHS = True
+WARM_START_INCLUDE_LHS = False
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
@@ -981,7 +981,7 @@ def main():
     # --------------------------------------------------------
 
     ub_Ising = (
-        1
+        2
         * single_pulse_min_time
     )
 
