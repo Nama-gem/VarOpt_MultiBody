@@ -449,11 +449,11 @@ def get_single_pulse_min_time(
     result = arr.optimize(
         ["Iz_echo"],
         1,
-        method='L-BFGS-B',
-        hessian=False,
+        method='trust-constr',
+        hessian=True,
         gradient=OPTIMIZER_GRADIENT,
         bounds=[
-            (0, 1e5)
+            (0, 1e6)
         ],
         options=options,
         results_dir=store.directory,
