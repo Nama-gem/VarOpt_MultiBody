@@ -34,7 +34,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1000
+N_INITIAL_CONDITIONS = 1
 LHS_SEED_BASE = None
 
 
@@ -425,18 +425,18 @@ def get_single_pulse_min_time(
         / "single_pulse_min_time.npy"
     )
 
-    # if cache_file.exists():
-    #
-    #     single_pulse_min_time = float(
-    #         np.load(cache_file)
-    #     )
-    #
-    #     print(
-    #         "Loaded single-pulse minimum time:",
-    #         single_pulse_min_time,
-    #     )
-    #
-    #     return single_pulse_min_time
+    if cache_file.exists():
+
+        single_pulse_min_time = float(
+            np.load(cache_file)
+        )
+
+        print(
+            "Loaded single-pulse minimum time:",
+            single_pulse_min_time,
+        )
+
+        return single_pulse_min_time
 
     print(
         "Optimizing single Iz_echo pulse..."
