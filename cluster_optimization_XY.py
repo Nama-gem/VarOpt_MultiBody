@@ -69,7 +69,7 @@ save_best = True
 #     Ask scipy to estimate the gradient numerically.
 #
 # Normally leave this as None.
-OPTIMIZER_GRADIENT = None
+OPTIMIZER_GRADIENT = False
 
 
 # ============================================================
