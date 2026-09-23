@@ -435,14 +435,13 @@ def get_single_pulse_min_time(
 
     result = arr.optimize(
         ["XY_echo"],
-        100,
-        method=method,
-        hessian=use_hessian,
-        gradient=OPTIMIZER_GRADIENT,
+        250,
+        method="trust-constr",
+        hessian=True,
+        gradient=None,
         bounds=[
             (0, 1e7)
         ],
-        options=options,
         results_dir=store.directory,
     )
 
