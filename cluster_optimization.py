@@ -34,7 +34,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1
+N_INITIAL_CONDITIONS = 1000
 LHS_SEED_BASE = None
 
 
@@ -981,7 +981,7 @@ def main():
     # --------------------------------------------------------
 
     ub_Ising = (
-        2
+        1
         * single_pulse_min_time
     )
 
