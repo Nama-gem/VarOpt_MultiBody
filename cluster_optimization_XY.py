@@ -402,18 +402,18 @@ def get_single_pulse_min_time(
     # Load cached result
     # --------------------------------------------------------
 
-    if cache_file.exists():
-
-        single_pulse_min_time = float(
-            np.load(cache_file)
-        )
-
-        print(
-            "Loaded single XY_echo minimum time:",
-            single_pulse_min_time,
-        )
-
-        return single_pulse_min_time
+    # if cache_file.exists():
+    #
+    #     single_pulse_min_time = float(
+    #         np.load(cache_file)
+    #     )
+    #
+    #     print(
+    #         "Loaded single XY_echo minimum time:",
+    #         single_pulse_min_time,
+    #     )
+    #
+    #     return single_pulse_min_time
 
 
     # --------------------------------------------------------
@@ -435,12 +435,12 @@ def get_single_pulse_min_time(
 
     result = arr.optimize(
         ["XY_echo"],
-        1.0,
+        100,
         method=method,
         hessian=use_hessian,
         gradient=OPTIMIZER_GRADIENT,
         bounds=[
-            (0, 1e6)
+            (0, 1e7)
         ],
         options=options,
         results_dir=store.directory,
