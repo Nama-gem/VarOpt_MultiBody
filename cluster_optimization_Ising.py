@@ -3,6 +3,7 @@
 import os
 import gc
 import ctypes
+import tempfile
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +35,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 3
+N_INITIAL_CONDITIONS = 1
 LHS_SEED_BASE = None
 
 
@@ -60,23 +61,22 @@ save_best = True
 
 # If True:
 #
-#     warm-start optimum
+#     all warm-start jobs
 #     + N_INITIAL_CONDITIONS LHS points
 #
 # are optimized.
 #
 # If False:
 #
-#     only the warm-start optimum
+#     only warm-start jobs are optimized.
 #
-# is optimized.
+# Warm-start parameter vectors are NOT loaded here.
+# They are loaded immediately before their optimization begins.
 WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
 WARM_START_RESCALE_ISING = True
-
-
 
 
 # ------------------------------------------------------------
@@ -85,11 +85,9 @@ WARM_START_RESCALE_ISING = True
 
 # None:
 #     Preserve the normal behavior of ConstructSquareArray.optimize().
-#     For SLSQP this means analytic gradients are used.
 #
 # False:
-#     Diagnostic mode in which SciPy estimates the gradient numerically.
-#     This avoids propagating all derivative states simultaneously.
+#     Ask scipy to estimate the gradient numerically.
 #
 # Normally leave this as None.
 OPTIMIZER_GRADIENT = None
@@ -101,15 +99,10 @@ OPTIMIZER_GRADIENT = None
 
 MEMORY_DIAGNOSTICS = True
 
-# Run Python garbage collection after every optimization.
 RUN_GC = True
 
-# On Linux/Terra, ask glibc to return unused heap memory to
-# the operating system after each completed optimization.
-#
-# This is useful diagnostically. If VmRSS falls substantially
-# after malloc_trim(), the memory was free internally but had
-# not been returned to the OS.
+# On Linux/Terra, ask glibc to return unused heap memory
+# to the operating system after each completed optimization.
 RUN_MALLOC_TRIM = True
 
 
@@ -121,8 +114,7 @@ def get_linux_memory():
         Current resident memory.
 
     VmHWM:
-        Peak resident memory ("high water mark") reached by
-        this process so far.
+        Peak resident memory ("high water mark").
 
     VmSize:
         Current virtual memory size.
@@ -142,18 +134,12 @@ def get_linux_memory():
         return result
 
     with status_file.open() as f:
-
         for line in f:
-
             for key in result:
-
                 if line.startswith(key + ":"):
-
-                    # /proc reports values in kB.
                     value_kb = float(
                         line.split()[1]
                     )
-
                     result[key] = (
                         value_kb / 1024.0
                     )
@@ -175,17 +161,14 @@ def print_memory(label):
     print(
         f"[MEMORY] {label}"
     )
-
     print(
         f"    VmRSS  = "
         f"{memory['VmRSS']:.1f} MB"
     )
-
     print(
         f"    VmHWM  = "
         f"{memory['VmHWM']:.1f} MB"
     )
-
     print(
         f"    VmSize = "
         f"{memory['VmSize']:.1f} MB"
@@ -194,8 +177,7 @@ def print_memory(label):
 
 def run_garbage_collection():
     """
-    Run Python garbage collection and report the number of
-    unreachable objects collected.
+    Run Python garbage collection.
     """
 
     if not RUN_GC:
@@ -204,7 +186,6 @@ def run_garbage_collection():
     n_collected = gc.collect()
 
     if MEMORY_DIAGNOSTICS:
-
         print(
             f"[MEMORY] gc.collect() collected "
             f"{n_collected} objects"
@@ -216,8 +197,7 @@ def run_malloc_trim():
     Ask glibc to return unused heap memory to the operating
     system.
 
-    This works on Linux systems using glibc, including typical
-    HPC environments. If unavailable, silently continue.
+    Useful on Linux/Terra. Silently continues if unavailable.
     """
 
     if not RUN_MALLOC_TRIM:
@@ -232,7 +212,6 @@ def run_malloc_trim():
         libc.malloc_trim(0)
 
         if MEMORY_DIAGNOSTICS:
-
             print(
                 "[MEMORY] malloc_trim(0) called"
             )
@@ -240,7 +219,6 @@ def run_malloc_trim():
     except Exception as exc:
 
         if MEMORY_DIAGNOSTICS:
-
             print(
                 "[MEMORY] malloc_trim unavailable:",
                 repr(exc),
@@ -251,8 +229,6 @@ def run_malloc_trim():
 # Warm-start settings
 # ============================================================
 
-# If False, the script behaves as before and only uses
-# Latin-hypercube initial conditions.
 USE_WARM_START = True
 
 
@@ -261,6 +237,7 @@ WARM_START_RB_VALUES = [
     2.0,
     2.5,
 ]
+
 
 WARM_START_OMEGA_DELTA_RATIOS = [
     (1, 2),
@@ -326,6 +303,106 @@ def project_to_bounds(
         bounds[:, 0],
         bounds[:, 1],
     )
+
+
+def save_summary_atomic(
+    summary_file,
+    *,
+    task_id,
+    Lx,
+    Ly,
+    Rb,
+    numerator,
+    denominator,
+    omega_over_delta,
+    n_layers,
+    best_fun,
+    best_x,
+    single_pulse_min_time,
+    ub_Ising,
+    completed_optimizations,
+    attempted_jobs,
+    total_jobs,
+    last_result_success,
+    last_result_message,
+):
+    """
+    Atomically update summary.npz.
+
+    The file is first written to a temporary file in the same
+    directory and then moved into place with os.replace().
+
+    Therefore another Slurm task reading this summary for a
+    warm start sees either the previous complete version or the
+    new complete version, never a partially written .npz file.
+    """
+
+    summary_file = Path(
+        summary_file
+    )
+
+    summary_file.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    fd, temporary_name = tempfile.mkstemp(
+        prefix=".summary_",
+        suffix=".npz",
+        dir=summary_file.parent,
+    )
+
+    os.close(fd)
+
+    temporary_file = Path(
+        temporary_name
+    )
+
+    try:
+
+        np.savez(
+            temporary_file,
+            task_id=task_id,
+            Lx=Lx,
+            Ly=Ly,
+            Rb=Rb,
+            numerator=numerator,
+            denominator=denominator,
+            omega_over_delta=omega_over_delta,
+            n_layers=n_layers,
+            best_fun=best_fun,
+            best_x=best_x,
+            single_pulse_min_time=(
+                single_pulse_min_time
+            ),
+            ub_Ising=ub_Ising,
+
+            # Progress information
+            completed_optimizations=(
+                completed_optimizations
+            ),
+            attempted_jobs=attempted_jobs,
+            total_jobs=total_jobs,
+
+            # Information about the most recently completed
+            # scipy optimization.
+            last_result_success=(
+                bool(last_result_success)
+            ),
+            last_result_message=(
+                str(last_result_message)
+            ),
+        )
+
+        os.replace(
+            temporary_file,
+            summary_file,
+        )
+
+    finally:
+
+        if temporary_file.exists():
+            temporary_file.unlink()
 
 
 # ============================================================
@@ -440,6 +517,7 @@ def get_single_pulse_min_time(
 
         return single_pulse_min_time
 
+
     print(
         "Optimizing single Iz_echo pulse..."
     )
@@ -451,7 +529,7 @@ def get_single_pulse_min_time(
     result = arr.optimize(
         ["Iz_echo"],
         1,
-        method='trust-constr',
+        method="trust-constr",
         hessian=True,
         gradient=OPTIMIZER_GRADIENT,
         bounds=[
@@ -508,6 +586,25 @@ def load_warm_start(
     target_single_pulse_min_time,
     rescale_ising=True,
 ):
+    """
+    Load an optimum from another (Rb, Omega/Delta) realization.
+
+    IMPORTANT:
+        This function is called immediately before the
+        corresponding optimization begins.
+
+        Therefore, if another Slurm job has improved its
+        summary.npz since this task started, this job uses the
+        newest available parameters.
+
+    Iz_echo and Ix_echo times are rescaled according to
+
+        target_single_pulse_min_time
+        ---------------------------------
+        source_single_pulse_min_time
+
+    Rx parameters are copied WITHOUT rescaling.
+    """
 
     source_layer_dir = (
         Path(source_ratio_dir)
@@ -574,6 +671,7 @@ def load_warm_start(
             data["best_fun"]
         )
 
+
     print()
     print(
         f"Source Rb              : "
@@ -605,6 +703,11 @@ def load_warm_start(
         f"{target_single_pulse_min_time}"
     )
 
+
+    # --------------------------------------------------------
+    # Check parameter count
+    # --------------------------------------------------------
+
     if len(x0) != len(
         target_sequence
     ):
@@ -616,6 +719,11 @@ def load_warm_start(
             f"Target parameters : "
             f"{len(target_sequence)}\n"
         )
+
+
+    # --------------------------------------------------------
+    # Rescale only Ising interaction times
+    # --------------------------------------------------------
 
     if rescale_ising:
 
@@ -641,12 +749,22 @@ def load_warm_start(
 
                 x0[i] *= scale
 
+            elif gate == "Rx":
+
+                # Explicitly leave Rx unchanged.
+                pass
+
     else:
 
         print()
         print(
             "Ising-time rescaling disabled."
         )
+
+
+    # --------------------------------------------------------
+    # Project onto target bounds
+    # --------------------------------------------------------
 
     x0_before_projection = (
         x0.copy()
@@ -671,6 +789,11 @@ def load_warm_start(
             "Warm-start parameters were "
             "projected onto target bounds."
         )
+
+
+    # --------------------------------------------------------
+    # Print resulting warm start
+    # --------------------------------------------------------
 
     print()
     print(
@@ -803,6 +926,11 @@ def main():
         task_id
     )
 
+
+    # ========================================================
+    # Task information
+    # ========================================================
+
     print("=" * 60)
 
     print(
@@ -863,9 +991,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Physical parameters
-    # --------------------------------------------------------
+    # ========================================================
 
     Delta = 1.0
 
@@ -885,9 +1013,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Construct array
-    # --------------------------------------------------------
+    # ========================================================
 
     print_memory(
         "immediately before ConstructSquareArray"
@@ -909,9 +1037,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Results directories
-    # --------------------------------------------------------
+    # ========================================================
 
     results_base_dir = Path(
         "results_Ising"
@@ -948,9 +1076,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Result stores
-    # --------------------------------------------------------
+    # ========================================================
 
     single_pulse_store = (
         OptimizationResultStore(
@@ -963,9 +1091,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Find/load single-pulse minimum
-    # --------------------------------------------------------
+    # ========================================================
 
     single_pulse_min_time = (
         get_single_pulse_min_time(
@@ -978,9 +1106,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Ising interaction upper bound
-    # --------------------------------------------------------
+    # ========================================================
 
     ub_Ising = (
         2
@@ -993,9 +1121,9 @@ def main():
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # Build sequence
-    # --------------------------------------------------------
+    # ========================================================
 
     sequence, bounds = (
         gate_sequence(
@@ -1024,12 +1152,23 @@ def main():
 
 
     # ========================================================
-    # Initial conditions
+    # Build optimization-job list
+    # ========================================================
+    #
+    # Warm-start PARAMETERS are deliberately NOT loaded here.
+    #
+    # Only the source directories are stored.
+    #
+    # Each source summary.npz is loaded immediately before its
+    # corresponding optimization begins.
     # ========================================================
 
-    initial_conditions = []
+    optimization_jobs = []
 
-    n_warm_starts = 0
+
+    # --------------------------------------------------------
+    # Warm-start jobs
+    # --------------------------------------------------------
 
     if USE_WARM_START:
 
@@ -1039,6 +1178,11 @@ def main():
                 source_numerator,
                 source_denominator,
             ) in WARM_START_OMEGA_DELTA_RATIOS:
+
+
+                # --------------------------------------------
+                # Skip target point itself
+                # --------------------------------------------
 
                 if (
                     np.isclose(
@@ -1066,6 +1210,11 @@ def main():
 
                     continue
 
+
+                # --------------------------------------------
+                # Store source location only
+                # --------------------------------------------
+
                 source_ratio_dir = (
                     parameter_directory(
                         base_dir=results_base_dir,
@@ -1077,57 +1226,25 @@ def main():
                     )
                 )
 
-                source_summary_file = (
-                    source_ratio_dir
-                    / f"layers_{n_layers}"
-                    / "summary.npz"
-                )
-
-                if not source_summary_file.exists():
-
-                    print()
-                    print(
-                        "Skipping missing warm-start source:"
-                    )
-
-                    print(
-                        f"Rb = {source_Rb}, "
-                        f"Omega/Delta = "
-                        f"{source_numerator}/"
-                        f"{source_denominator}"
-                    )
-
-                    print(
-                        f"Missing file: "
-                        f"{source_summary_file.resolve()}"
-                    )
-
-                    continue
-
-                warm_start = (
-                    load_warm_start(
-                        source_ratio_dir=source_ratio_dir,
-                        n_layers=n_layers,
-                        target_sequence=sequence,
-                        target_bounds=bounds,
-                        target_single_pulse_min_time=(
-                            single_pulse_min_time
+                optimization_jobs.append(
+                    {
+                        "type": "warm_start",
+                        "source_Rb": source_Rb,
+                        "source_numerator": (
+                            source_numerator
                         ),
-                        rescale_ising=(
-                            WARM_START_RESCALE_ISING
+                        "source_denominator": (
+                            source_denominator
                         ),
-                    )
+                        "source_ratio_dir": (
+                            source_ratio_dir
+                        ),
+                    }
                 )
-
-                initial_conditions.append(
-                    warm_start
-                )
-
-                n_warm_starts += 1
 
 
     # --------------------------------------------------------
-    # Latin-hypercube initial conditions
+    # Latin-hypercube jobs
     # --------------------------------------------------------
 
     use_lhs = (
@@ -1156,47 +1273,63 @@ def main():
             )
         )
 
-        initial_conditions.extend(
-            lhs_conditions
-        )
+        for x0 in lhs_conditions:
 
+            optimization_jobs.append(
+                {
+                    "type": "lhs",
+                    "x0": np.asarray(
+                        x0,
+                        dtype=float,
+                    ),
+                }
+            )
 
-    initial_conditions = (
-        np.asarray(
-            initial_conditions,
-            dtype=float,
-        )
-    )
 
     if len(
-        initial_conditions
+        optimization_jobs
     ) == 0:
 
         raise RuntimeError(
-            "No initial conditions were generated."
+            "No optimization jobs were generated."
         )
 
 
-    # --------------------------------------------------------
-    # Initial-condition summary
-    # --------------------------------------------------------
+    # ========================================================
+    # Optimization-job summary
+    # ========================================================
+
+    n_scheduled_warm_starts = sum(
+        job["type"] == "warm_start"
+        for job in optimization_jobs
+    )
+
+    n_scheduled_lhs = sum(
+        job["type"] == "lhs"
+        for job in optimization_jobs
+    )
 
     print()
     print("=" * 60)
-    print("INITIAL CONDITIONS")
+    print("OPTIMIZATION JOBS")
     print("=" * 60)
 
     print(
-        "Total initial conditions:",
-        len(initial_conditions),
+        "Total scheduled jobs:",
+        len(optimization_jobs),
+    )
+
+    print(
+        "Warm-start jobs:",
+        n_scheduled_warm_starts,
+    )
+
+    print(
+        "LHS jobs:",
+        n_scheduled_lhs,
     )
 
     if USE_WARM_START:
-
-        print(
-            "Warm-start conditions:",
-            n_warm_starts,
-        )
 
         print(
             "Warm-start Rb values:",
@@ -1213,8 +1346,15 @@ def main():
             WARM_START_RESCALE_ISING,
         )
 
+        print()
+        print(
+            "Warm-start summary files will be "
+            "loaded immediately before each "
+            "optimization."
+        )
+
     print_memory(
-        "after generation of initial conditions"
+        "after generation of optimization jobs"
     )
 
 
@@ -1222,59 +1362,173 @@ def main():
     # Run optimizations
     # ========================================================
 
-    # Store only the quantities we actually need rather than
-    # retaining an entire scipy OptimizeResult indefinitely.
     best_fun = np.inf
     best_x = None
 
-    n_optimizations = len(
-        initial_conditions
+    summary_file = (
+        layer_dir
+        / "summary.npz"
     )
 
-    for i, x0 in enumerate(
-        initial_conditions
+    n_jobs = len(
+        optimization_jobs
+    )
+
+    completed_optimizations = 0
+
+
+    for job_index, job in enumerate(
+        optimization_jobs
     ):
 
         print()
         print("=" * 60)
 
         print(
-            f"Optimization "
-            f"{i + 1}/"
-            f"{n_optimizations}"
+            f"Optimization job "
+            f"{job_index + 1}/"
+            f"{n_jobs}"
         )
 
-        if (
-            USE_WARM_START
-            and i < n_warm_starts
-        ):
-
-            print(
-                "Initial condition: "
-                "WARM START"
-            )
-
-        else:
-
-            print(
-                "Initial condition: "
-                "LHS"
-            )
+        print(
+            f"Job type: "
+            f"{job['type'].upper()}"
+        )
 
         print("=" * 60)
 
-        # ----------------------------------------------------
-        # MEMORY BEFORE
-        # ----------------------------------------------------
+
+        # ====================================================
+        # Obtain initial condition
+        # ====================================================
+
+        if job["type"] == "warm_start":
+
+            source_Rb = (
+                job["source_Rb"]
+            )
+
+            source_numerator = (
+                job["source_numerator"]
+            )
+
+            source_denominator = (
+                job["source_denominator"]
+            )
+
+            source_ratio_dir = (
+                job["source_ratio_dir"]
+            )
+
+            source_summary_file = (
+                source_ratio_dir
+                / f"layers_{n_layers}"
+                / "summary.npz"
+            )
+
+            print()
+            print(
+                "About to load warm start from:"
+            )
+
+            print(
+                source_summary_file.resolve()
+            )
+
+
+            # -----------------------------------------------
+            # Check existence NOW
+            # -----------------------------------------------
+
+            if not source_summary_file.exists():
+
+                print()
+                print(
+                    "Warm-start summary is not available "
+                    "at optimization time."
+                )
+
+                print(
+                    "Skipping this warm-start job:"
+                )
+
+                print(
+                    f"Rb = {source_Rb}, "
+                    f"Omega/Delta = "
+                    f"{source_numerator}/"
+                    f"{source_denominator}"
+                )
+
+                print(
+                    "Missing file:"
+                )
+
+                print(
+                    source_summary_file.resolve()
+                )
+
+                continue
+
+
+            # -----------------------------------------------
+            # Load newest summary immediately before optimize
+            # -----------------------------------------------
+
+            try:
+
+                x0 = load_warm_start(
+                    source_ratio_dir=source_ratio_dir,
+                    n_layers=n_layers,
+                    target_sequence=sequence,
+                    target_bounds=bounds,
+                    target_single_pulse_min_time=(
+                        single_pulse_min_time
+                    ),
+                    rescale_ising=(
+                        WARM_START_RESCALE_ISING
+                    ),
+                )
+
+            except FileNotFoundError:
+
+                print()
+                print(
+                    "Warm-start summary disappeared before "
+                    "it could be loaded. Skipping job."
+                )
+
+                continue
+
+
+        elif job["type"] == "lhs":
+
+            x0 = np.asarray(
+                job["x0"],
+                dtype=float,
+            ).copy()
+
+
+        else:
+
+            raise ValueError(
+                f"Unknown optimization job type: "
+                f"{job['type']}"
+            )
+
+
+        # ====================================================
+        # Memory before
+        # ====================================================
 
         print_memory(
-            f"before optimization {i + 1}"
+            f"before optimization job "
+            f"{job_index + 1}"
         )
 
 
-        # ----------------------------------------------------
-        # OPTIMIZATION
-        # ----------------------------------------------------
+        # ====================================================
+        # Optimization
+        # ====================================================
 
         result = arr.optimize(
             sequence,
@@ -1292,18 +1546,19 @@ def main():
         )
 
 
-        # ----------------------------------------------------
-        # MEMORY IMMEDIATELY AFTER
-        # ----------------------------------------------------
+        # ====================================================
+        # Memory immediately after
+        # ====================================================
 
         print_memory(
-            f"immediately after optimization {i + 1}"
+            f"immediately after optimization job "
+            f"{job_index + 1}"
         )
 
 
-        # ----------------------------------------------------
-        # Extract only required result information
-        # ----------------------------------------------------
+        # ====================================================
+        # Extract required result information
+        # ====================================================
 
         current_fun = float(
             result.fun
@@ -1314,6 +1569,8 @@ def main():
             dtype=float,
             copy=True,
         )
+
+        completed_optimizations += 1
 
         print(
             f"Objective: {current_fun}"
@@ -1355,56 +1612,135 @@ def main():
             )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # Update best result
-        # ----------------------------------------------------
+        # ====================================================
+        #
+        # Accept every completed optimization returning a
+        # finite objective, even if scipy sets success=False.
+        # ====================================================
 
-        if (
-            best_x is None
-            or current_fun < best_fun
+        if np.isfinite(
+            current_fun
         ):
 
-            best_fun = current_fun
+            if (
+                best_x is None
+                or current_fun < best_fun
+            ):
 
-            best_x = current_x.copy()
+                best_fun = (
+                    current_fun
+                )
 
+                best_x = (
+                    current_x.copy()
+                )
+
+                print(
+                    "New best result:",
+                    best_fun,
+                )
+
+        else:
+
+            print()
             print(
-                "New best result:",
-                best_fun,
+                "WARNING: optimization returned a "
+                "non-finite objective."
             )
 
 
-        # ----------------------------------------------------
-        # Explicitly release OptimizeResult
-        # ----------------------------------------------------
+        # ====================================================
+        # Save summary after EVERY completed optimization
+        # ====================================================
+
+        if best_x is not None:
+
+            save_summary_atomic(
+                summary_file,
+                task_id=task_id,
+                Lx=LX,
+                Ly=LY,
+                Rb=Rb,
+                numerator=numerator,
+                denominator=denominator,
+                omega_over_delta=(
+                    omega_over_delta
+                ),
+                n_layers=n_layers,
+                best_fun=best_fun,
+                best_x=best_x,
+                single_pulse_min_time=(
+                    single_pulse_min_time
+                ),
+                ub_Ising=ub_Ising,
+                completed_optimizations=(
+                    completed_optimizations
+                ),
+                attempted_jobs=(
+                    job_index + 1
+                ),
+                total_jobs=n_jobs,
+                last_result_success=(
+                    result.success
+                ),
+                last_result_message=(
+                    result.message
+                ),
+            )
+
+            print()
+            print(
+                "Summary updated:"
+            )
+
+            print(
+                summary_file.resolve()
+            )
+
+            print(
+                f"Best objective so far: "
+                f"{best_fun}"
+            )
+
+            print(
+                f"Completed optimizations: "
+                f"{completed_optimizations}"
+            )
+
+
+        # ====================================================
+        # Explicitly release objects
+        # ====================================================
 
         del result
         del current_x
+        del x0
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # Garbage collection
-        # ----------------------------------------------------
+        # ====================================================
 
         run_garbage_collection()
 
         print_memory(
             f"after gc.collect(), "
-            f"optimization {i + 1}"
+            f"job {job_index + 1}"
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # glibc malloc_trim
-        # ----------------------------------------------------
+        # ====================================================
 
         run_malloc_trim()
 
         print_memory(
             f"after malloc_trim(), "
-            f"optimization {i + 1}"
+            f"job {job_index + 1}"
         )
-
 
         print(
             "-" * 60
@@ -1412,43 +1748,18 @@ def main():
 
 
     # ========================================================
-    # Save compact summary
+    # Check that at least one optimization completed
     # ========================================================
 
     if best_x is None:
 
         raise RuntimeError(
-            "No optimization result was obtained."
+            "No usable optimization result was obtained."
         )
-
-    summary_file = (
-        layer_dir
-        / "summary.npz"
-    )
-
-    np.savez(
-        summary_file,
-        task_id=task_id,
-        Lx=LX,
-        Ly=LY,
-        Rb=Rb,
-        numerator=numerator,
-        denominator=denominator,
-        omega_over_delta=(
-            omega_over_delta
-        ),
-        n_layers=n_layers,
-        best_fun=best_fun,
-        best_x=best_x,
-        single_pulse_min_time=(
-            single_pulse_min_time
-        ),
-        ub_Ising=ub_Ising,
-    )
 
 
     # ========================================================
-    # Summary
+    # Final summary
     # ========================================================
 
     print()
@@ -1477,6 +1788,16 @@ def main():
     )
 
     print(
+        f"Gate sequence  : "
+        f"{sequence}"
+    )
+
+    print(
+        f"Single Ising t : "
+        f"{single_pulse_min_time}"
+    )
+
+    print(
         f"Best objective : "
         f"{best_fun}"
     )
@@ -1487,6 +1808,11 @@ def main():
 
     print(
         best_x
+    )
+
+    print(
+        f"Completed opts : "
+        f"{completed_optimizations}"
     )
 
     print(
