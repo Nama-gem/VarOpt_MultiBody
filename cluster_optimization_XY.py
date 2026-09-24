@@ -57,6 +57,26 @@ options = {
 
 save_best = True
 
+# If True:
+#
+#     all available warm starts
+#     + N_INITIAL_CONDITIONS LHS points
+#
+# are optimized.
+#
+# If False:
+#
+#     only available warm starts are optimized.
+WARM_START_INCLUDE_LHS = False
+
+
+# Rescale XY_echo durations using the ratio of single-pulse
+# first-minimum times.
+#
+# Rx rotations are NOT rescaled.
+WARM_START_RESCALE_XY = True
+
+
 
 # ------------------------------------------------------------
 # Gradient diagnostic
@@ -69,7 +89,7 @@ save_best = True
 #     Ask scipy to estimate the gradient numerically.
 #
 # Normally leave this as None.
-OPTIMIZER_GRADIENT = False
+OPTIMIZER_GRADIENT = True
 
 
 # ============================================================
@@ -202,26 +222,6 @@ WARM_START_OMEGA_DELTA_RATIOS = [
     (1, 7),
     (1, 10),
 ]
-
-
-# If True:
-#
-#     all available warm starts
-#     + N_INITIAL_CONDITIONS LHS points
-#
-# are optimized.
-#
-# If False:
-#
-#     only available warm starts are optimized.
-WARM_START_INCLUDE_LHS = True
-
-
-# Rescale XY_echo durations using the ratio of single-pulse
-# first-minimum times.
-#
-# Rx rotations are NOT rescaled.
-WARM_START_RESCALE_XY = True
 
 
 # ============================================================
