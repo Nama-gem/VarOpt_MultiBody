@@ -24,6 +24,6 @@ data/
 
 output/
 
-#analyze_Ising_optimization_results.ipynb
-#
-#analyze_XY_optimization_results.ipynb
+analyze_Ising_optimization_results.ipynb
+
+analyze_XY_optimization_results.ipynb
