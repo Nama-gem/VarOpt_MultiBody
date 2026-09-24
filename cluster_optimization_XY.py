@@ -35,7 +35,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1
+N_INITIAL_CONDITIONS = 1000
 
 LHS_SEED_BASE = None
 
@@ -44,14 +44,14 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -72,7 +72,7 @@ save_best = True
 #
 # Importantly, warm-start files are NOT loaded here.
 # They are loaded immediately before each optimization begins.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # Rescale XY_echo durations using the ratio of single-pulse
