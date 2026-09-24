@@ -1,4 +1,4 @@
-# cluster_optimization.py
+# cluster_optimization_Ising.py
 
 import os
 import gc
@@ -42,20 +42,41 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
 }
 
 save_best = True
+
+
+# If True:
+#
+#     warm-start optimum
+#     + N_INITIAL_CONDITIONS LHS points
+#
+# are optimized.
+#
+# If False:
+#
+#     only the warm-start optimum
+#
+# is optimized.
+WARM_START_INCLUDE_LHS = False
+
+
+# If True, rescale only Iz_echo and Ix_echo durations.
+WARM_START_RESCALE_ISING = True
+
+
 
 
 # ------------------------------------------------------------
@@ -248,25 +269,6 @@ WARM_START_OMEGA_DELTA_RATIOS = [
     (1, 7),
     (1, 10),
 ]
-
-
-# If True:
-#
-#     warm-start optimum
-#     + N_INITIAL_CONDITIONS LHS points
-#
-# are optimized.
-#
-# If False:
-#
-#     only the warm-start optimum
-#
-# is optimized.
-WARM_START_INCLUDE_LHS = False
-
-
-# If True, rescale only Iz_echo and Ix_echo durations.
-WARM_START_RESCALE_ISING = True
 
 
 # ============================================================

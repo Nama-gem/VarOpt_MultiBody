@@ -44,7 +44,7 @@ VarOpt_MultiBody_Ising/
   requirements-notebook.txt
 ```
 
-Start with `example_optimization_Ising.ipynb` in the main folder and select the
+Start with `examples/example_optimization_Ising.ipynb` in the main folder and select the
 project's `.venv` Python interpreter as its notebook kernel. Run all cells in
 order. The example uses a 4x4 open array with n=3 and one bounded optimization.
 Its executed output is included; saving is disabled by default in the example.
@@ -476,7 +476,7 @@ through this API and share a filesystem with working flock and atomic rename.
 Ordinary cloud-synced copies on separate computers do not provide that shared
 lock. Check these guarantees for a cluster's shared filesystem.
 
-`example_optimization_worker.py` repeatedly reads the best record, chooses a
+`examples/example_optimization_worker.py` repeatedly reads the best record, chooses a
 random start or perturbs the best parameters, optimizes, and submits successful
 improvements. Run copies in separate terminals or scheduler jobs with the same
 system options, directory and bounds; independent seeds explore different starts:
@@ -520,7 +520,7 @@ and each microscopic m-site cluster uses a dense 2**m matrix. Start with n=2
 or 3 and test convergence. Default guards are 20 sites and one million clusters.
 Higher cluster orders can be expensive even when time evolution is fast.
 
-`benchmark_4x4.json` records example runs for both boundaries with n=3,
+`examples/benchmark_4x4.json` records example runs for both boundaries with n=3,
 Rb=1.5, Omega=0.5, gates [Iz_echo, Rx, Iz_echo], initial parameters
 [20, 0.4, 15], bounds [(1,200),(-pi,pi),(1,200)], maxiter=100 and gtol=1e-7
 (L-BFGS-B also used ftol=1e-12). OpenMP and OpenBLAS each used one thread.
