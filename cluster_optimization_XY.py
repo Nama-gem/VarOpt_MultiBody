@@ -73,7 +73,7 @@ save_best = True
 #
 # Importantly, warm-start files are NOT loaded here.
 # They are loaded immediately before each optimization begins.
-WARM_START_INCLUDE_LHS = True
+WARM_START_INCLUDE_LHS = False
 
 
 # Rescale XY_echo durations using the ratio of single-pulse
