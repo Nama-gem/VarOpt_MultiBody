@@ -34,7 +34,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1000
+N_INITIAL_CONDITIONS = 1
 LHS_SEED_BASE = None
 
 
@@ -70,7 +70,7 @@ save_best = True
 #     only the warm-start optimum
 #
 # is optimized.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
