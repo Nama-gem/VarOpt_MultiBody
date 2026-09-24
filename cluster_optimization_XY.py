@@ -23,6 +23,7 @@ RB_VALUES = [
     1.5,
     2.0,
     2.5,
+    3.0,
 ]
 
 OMEGA_DELTA_RATIOS = [
@@ -216,6 +217,7 @@ WARM_START_RB_VALUES = [
     1.5,
     2.0,
     2.5,
+    3.0
 ]
 
 
