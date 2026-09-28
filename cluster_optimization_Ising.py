@@ -59,18 +59,8 @@ options = {
 
 save_best = True
 
+USE_WARM_START = True
 
-# If True:
-#
-#     all warm-start jobs
-#     + N_INITIAL_CONDITIONS LHS points
-#
-# are optimized.
-#
-# If False:
-#
-#     only warm-start jobs are optimized.
-#
 # Warm-start parameter vectors are NOT loaded here.
 # They are loaded immediately before their optimization begins.
 WARM_START_INCLUDE_LHS = False
