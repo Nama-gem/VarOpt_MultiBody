@@ -44,14 +44,14 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -1113,7 +1113,7 @@ def main():
     # ========================================================
 
     ub_Ising = (
-        2
+        2.5
         * single_pulse_min_time
     )
 
