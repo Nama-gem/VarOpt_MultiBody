@@ -44,11 +44,11 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
-
-method = "SLSQP"
+method = "L-BFGS-B"
 use_hessian = False
+
+# method = "SLSQP"
+# use_hessian = False
 
 # method = "trust-constr"
 # use_hessian = True
@@ -224,31 +224,6 @@ def run_malloc_trim():
                 "[MEMORY] malloc_trim unavailable:",
                 repr(exc),
             )
-
-
-# ============================================================
-# Warm-start settings
-# ============================================================
-
-USE_WARM_START = True
-
-
-WARM_START_RB_VALUES = [
-    1.5,
-    2.0,
-    2.5,
-    3.0,
-]
-
-
-WARM_START_OMEGA_DELTA_RATIOS = [
-    (1, 2),
-    (1, 3),
-    (1, 5),
-    (1, 7),
-    (1, 10),
-]
-
 
 # ============================================================
 # Helpers
@@ -1113,7 +1088,7 @@ def main():
     # ========================================================
 
     ub_Ising = (
-        2.5
+        3
         * single_pulse_min_time
     )
 
