@@ -44,11 +44,11 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-method = "L-BFGS-B"
-use_hessian = False
-
-# method = "SLSQP"
+# method = "L-BFGS-B"
 # use_hessian = False
+
+method = "SLSQP"
+use_hessian = False
 
 # method = "trust-constr"
 # use_hessian = True
