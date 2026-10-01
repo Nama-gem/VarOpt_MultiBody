@@ -10,6 +10,7 @@ import numpy as np
 from scipy.stats import qmc
 
 from functions import ConstructSquareArray, OptimizationResultStore
+import fcntl
 
 
 # ============================================================
@@ -310,101 +311,90 @@ def project_to_bounds(
 def save_summary_atomic(
     summary_file,
     *,
-    task_id,
-    Lx,
-    Ly,
-    Rb,
-    numerator,
-    denominator,
-    omega_over_delta,
-    n_layers,
     best_fun,
     best_x,
-    single_pulse_min_time,
-    ub_Ising,
-    completed_optimizations,
-    attempted_jobs,
-    total_jobs,
-    last_result_success,
-    last_result_message,
+    **metadata,
 ):
     """
-    Atomically update summary.npz.
+    Save only if best_fun improves on the existing summary.
 
-    The file is first written to a temporary file in the same
-    directory and then moved into place with os.replace().
+    Returns True if saved, False otherwise.
 
-    Therefore another Slurm task reading this summary for a
-    warm start sees either the previous complete version or the
-    new complete version, never a partially written .npz file.
+    Uses a persistent lock file to protect concurrent writers
+    on Linux/macOS. Every writer must use this function.
     """
+    best_fun = float(best_fun)
 
-    summary_file = Path(
-        summary_file
+    # Never save a failed/non-finite objective value.
+    if not np.isfinite(best_fun):
+        return False
+
+    summary_file = Path(summary_file).resolve()
+    summary_file.parent.mkdir(parents=True, exist_ok=True)
+
+    lock_file = summary_file.with_name(
+        summary_file.name + ".lock"
     )
 
-    summary_file.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    # Keep this lock file in place; do not delete it after use.
+    with lock_file.open("a+b") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
 
-    fd, temporary_name = tempfile.mkstemp(
-        prefix=".summary_",
-        suffix=".npz",
-        dir=summary_file.parent,
-    )
+        try:
+            # Compare while holding the lock.
+            if summary_file.exists():
+                with np.load(
+                    summary_file,
+                    allow_pickle=False,
+                ) as saved:
+                    previous_best = float(
+                        saved["best_fun"].item()
+                    )
 
-    os.close(fd)
+                if (
+                    np.isfinite(previous_best)
+                    and best_fun >= previous_best
+                ):
+                    return False
 
-    temporary_file = Path(
-        temporary_name
-    )
+            # Preserve the original metadata conversions.
+            if "last_result_success" in metadata:
+                metadata["last_result_success"] = bool(
+                    metadata["last_result_success"]
+                )
 
-    try:
+            if "last_result_message" in metadata:
+                metadata["last_result_message"] = str(
+                    metadata["last_result_message"]
+                )
 
-        np.savez(
-            temporary_file,
-            task_id=task_id,
-            Lx=Lx,
-            Ly=Ly,
-            Rb=Rb,
-            numerator=numerator,
-            denominator=denominator,
-            omega_over_delta=omega_over_delta,
-            n_layers=n_layers,
-            best_fun=best_fun,
-            best_x=best_x,
-            single_pulse_min_time=(
-                single_pulse_min_time
-            ),
-            ub_Ising=ub_Ising,
+            fd, temporary_name = tempfile.mkstemp(
+                prefix=".summary_",
+                suffix=".npz",
+                dir=summary_file.parent,
+            )
+            temporary_file = Path(temporary_name)
 
-            # Progress information
-            completed_optimizations=(
-                completed_optimizations
-            ),
-            attempted_jobs=attempted_jobs,
-            total_jobs=total_jobs,
+            try:
+                with os.fdopen(fd, "wb") as stream:
+                    np.savez(
+                        stream,
+                        best_fun=best_fun,
+                        best_x=np.array(best_x, copy=True),
+                        **metadata,
+                    )
+                    stream.flush()
+                    os.fsync(stream.fileno())
 
-            # Information about the most recently completed
-            # scipy optimization.
-            last_result_success=(
-                bool(last_result_success)
-            ),
-            last_result_message=(
-                str(last_result_message)
-            ),
-        )
+                os.replace(temporary_file, summary_file)
 
-        os.replace(
-            temporary_file,
-            summary_file,
-        )
+            finally:
+                temporary_file.unlink(missing_ok=True)
 
-    finally:
+            return True
 
-        if temporary_file.exists():
-            temporary_file.unlink()
+        finally:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_UN)
 
 
 # ============================================================
