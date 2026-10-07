@@ -1018,7 +1018,7 @@ def main():
         Ly=LY,
         Rb=Rb,
         Omega=Omega,
-        n=6,
+        n=16,
         boundary="open",
         backend="quspin",
         use_reflections=True,
