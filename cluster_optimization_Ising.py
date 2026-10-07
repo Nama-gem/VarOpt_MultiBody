@@ -37,7 +37,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1000
+N_INITIAL_CONDITIONS = 10
 LHS_SEED_BASE = None
 
 
@@ -45,8 +45,8 @@ LHS_SEED_BASE = None
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
+method = "L-BFGS-B"
+use_hessian = False
 
 # method = "SLSQP"
 # use_hessian = False
@@ -74,7 +74,7 @@ save_best = True
 #
 # Warm-start parameter vectors are NOT loaded here.
 # They are loaded immediately before their optimization begins.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only Iz_echo and Ix_echo durations.
