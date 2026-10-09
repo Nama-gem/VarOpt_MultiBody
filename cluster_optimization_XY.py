@@ -37,7 +37,7 @@ OMEGA_DELTA_RATIOS = [
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 10
+N_INITIAL_CONDITIONS = 1000
 
 LHS_SEED_BASE = None
 
@@ -74,7 +74,7 @@ save_best = True
 #
 # Importantly, warm-start files are NOT loaded here.
 # They are loaded immediately before each optimization begins.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # Rescale XY_echo durations using the ratio of single-pulse
@@ -1063,7 +1063,7 @@ def main():
         Ly=LY,
         Rb=Rb,
         Omega=Omega,
-        n=10,
+        n=12,
         boundary="open",
         backend="quspin",
         use_reflections=True,
@@ -1148,7 +1148,7 @@ def main():
     # ========================================================
 
     ub_XY = (
-        2
+        1.5
         * single_pulse_min_time
     )
 
