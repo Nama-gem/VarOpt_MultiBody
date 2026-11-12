@@ -27,3 +27,5 @@ output/
 analyze_Ising_optimization_results.ipynb
 analyze_XY_optimization_results.ipynb
 /analyze_SuzukiTrotter_optimization_results.ipynb
+
+/tests/test_suzuki_trotter.py
