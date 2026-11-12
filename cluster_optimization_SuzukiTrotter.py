@@ -82,7 +82,7 @@ save_best = True
 #
 # Warm-start parameter vectors are NOT loaded here.
 # They are loaded immediately before their optimization begins.
-WARM_START_INCLUDE_LHS = True
+WARM_START_INCLUDE_LHS = False
 
 
 # If True, rescale only the shared Suzuki-Trotter gate durations.
