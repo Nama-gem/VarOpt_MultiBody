@@ -1,10 +1,10 @@
 """Fully echoed multibody ZZ+XX Suzuki-Trotter optimization.
 
-SLURM_ARRAY_TASK_ID=0..299 covers orders 1, 2 and 3 in blocks of 100,
+SLURM_ARRAY_TASK_ID=0..399 covers orders 1, 2, 3 and 4 in blocks of 100,
 with the same Rb, Omega/Delta and layer grid as cluster_optimization_Ising.
 Each layer has one shared time t; Rx rotations appear only between layers.
-All orders begin with z evolution. Order 3 uses signed interaction steps
-(requires interaction-sign reversal); absolute time is 41*t/12, vs 2*t for 1/2.
+All orders begin with z evolution. Orders 3/4 require interaction-sign reversal.
+Absolute times are 2*t (orders 1/2), 41*t/12 (3), (7/(2-2**(1/3))-2)*t (4).
 """
 
 import os
@@ -42,8 +42,8 @@ OMEGA_DELTA_RATIOS = [
     (1, 10),
 ]
 
-TROTTER_ORDERS = (1, 2, 3)
-WARM_START_TROTTER_ORDERS = (1, 2, 3)
+TROTTER_ORDERS = (1, 2, 3, 4)
+WARM_START_TROTTER_ORDERS = (1, 2, 3, 4)
 
 MAX_LAYERS = 5
 
@@ -414,7 +414,7 @@ def save_summary_atomic(
 def gate_sequence(n_layers, ub_Ising, trotter_order=1):
     """One shared interaction time per layer, separated by variational Rx."""
     if trotter_order not in TROTTER_ORDERS:
-        raise ValueError("trotter_order must be 1, 2 or 3")
+        raise ValueError("trotter_order must be 1, 2, 3 or 4")
     sequence, bounds = [], []
     for layer in range(n_layers):
         if layer > 0:
@@ -760,6 +760,7 @@ def load_warm_start(
                 "SuzukiTrotter1",
                 "SuzukiTrotter2",
                 "SuzukiTrotter3",
+                "SuzukiTrotter4",
             ):
 
                 x0[i] *= scale

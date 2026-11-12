@@ -3,7 +3,7 @@
 #SBATCH --job-name=varopt_suzuki
 #SBATCH --partition=jila
 #SBATCH --qos=long
-#SBATCH --array=0-299
+#SBATCH --array=0-399
 #SBATCH --time=7-00:00:00
 #SBATCH --mem=6G
 #SBATCH --cpus-per-task=1

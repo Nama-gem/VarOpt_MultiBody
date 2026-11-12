@@ -23,8 +23,10 @@ class ConstructSquareArray:
     at construction: build a new object when changing the interaction.
     """
     gates = ('Rx', 'Ry', 'Rz', 'Iz', 'Iz_echo', 'Dz', 'Ix', 'Ix_echo', 'XY', 'XY_echo',
-             'SuzukiTrotter1', 'SuzukiTrotter2', 'SuzukiTrotter3')
+             'SuzukiTrotter1', 'SuzukiTrotter2', 'SuzukiTrotter3', 'SuzukiTrotter4')
     # Chronological factors; all durations share the single gate parameter t.
+    _fourth_w = 1 / (2 - 2**(1/3))
+    _fourth_v = 1 - 2*_fourth_w
     _trotter_factors = {
         'SuzukiTrotter1': (('Iz_echo', 1.), ('Ix_echo', 1.)),
         'SuzukiTrotter2': (('Iz_echo', .5), ('Ix_echo', 1.), ('Iz_echo', .5)),
@@ -33,6 +35,13 @@ class ConstructSquareArray:
         'SuzukiTrotter3': (('Iz_echo', 7/24), ('Ix_echo', 2/3),
                            ('Iz_echo', 3/4), ('Ix_echo', -2/3),
                            ('Iz_echo', -1/24), ('Ix_echo', 1.)),
+        # Symmetric triple jump S2(w*t) S2(v*t) S2(w*t), merging
+        # adjacent z factors before echoing; local error O(t**5).
+        'SuzukiTrotter4': (('Iz_echo', _fourth_w/2), ('Ix_echo', _fourth_w),
+                           ('Iz_echo', (_fourth_w+_fourth_v)/2),
+                           ('Ix_echo', _fourth_v),
+                           ('Iz_echo', (_fourth_w+_fourth_v)/2),
+                           ('Ix_echo', _fourth_w), ('Iz_echo', _fourth_w/2)),
     }
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
@@ -349,12 +358,15 @@ class ConstructSquareArray:
         full multibody interaction: all odd Pauli orders cancel, even orders
         and the constant remain. Orders 1/2 use total native time 2*abs(t). Order 3 is a Ruth
         splitting with signed steps: total absolute native time 41*abs(t)/12.
-        Its negative steps require physical interaction-sign reversal.
+        Order 4 is the symmetric triple jump of order 2, with adjacent z
+        factors merged (7 echoed factors, 14 native applications). Its
+        absolute native time is (7/(2-2**(1/3))-2)*abs(t).
+        Orders 3/4 require physical interaction-sign reversal.
         The explicit order-1 pulse sequence differs only by a global 2*pi
         spin-rotation phase, which is omitted here.
         """
-        if order not in (1, 2, 3):
-            raise ValueError('order must be 1, 2 or 3.')
+        if order not in (1, 2, 3, 4):
+            raise ValueError('order must be 1, 2, 3 or 4.')
         if not np.isfinite(time):
             raise ValueError('time must be finite.')
         return self._apply_gate(state, f'SuzukiTrotter{order}', time)
