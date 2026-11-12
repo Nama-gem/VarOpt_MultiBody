@@ -22,7 +22,13 @@ class ConstructSquareArray:
     Times are Delta*t_phys, rotation angles are radians. Parameters are fixed
     at construction: build a new object when changing the interaction.
     """
-    gates = ('Rx', 'Ry', 'Rz', 'Iz', 'Iz_echo', 'Dz', 'Ix', 'Ix_echo', 'XY', 'XY_echo')
+    gates = ('Rx', 'Ry', 'Rz', 'Iz', 'Iz_echo', 'Dz', 'Ix', 'Ix_echo', 'XY', 'XY_echo',
+             'SuzukiTrotter1', 'SuzukiTrotter2')
+    # Chronological factors; all durations share the single gate parameter t.
+    _trotter_factors = {
+        'SuzukiTrotter1': (('Iz_echo', 1.), ('Ix_echo', 1.)),
+        'SuzukiTrotter2': (('Iz_echo', .5), ('Ix_echo', 1.), ('Iz_echo', .5)),
+    }
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
                  max_clusters=1_000_000, convention='paper', boundary='open',
@@ -301,6 +307,10 @@ class ConstructSquareArray:
         return theta
 
     def _apply_gate(self, state, token, value):
+        if token in self._trotter_factors:
+            for primitive, scale in self._trotter_factors[token]:
+                state = self._apply_gate(state, primitive, scale*value)
+            return state
         if token.startswith('R'):
             return self.rotate(state, token[1], value)
         if token in ('Ix', 'Ix_echo'):
@@ -315,6 +325,8 @@ class ConstructSquareArray:
 
     def _gate_derivative(self, state, token):
         """Apply -iG; for Dz the fixed pi rotation commutes with H_even."""
+        if token in self._trotter_factors:
+            raise ValueError('Composite gates require the product rule in _gate_jet.')
         if token.startswith('R'):
             return -1j*self.collective(token[1], state)
         if token in ('Ix', 'Ix_echo'):
@@ -323,6 +335,43 @@ class ConstructSquareArray:
             return -1j*(self.xy_operator(echo=token == 'XY_echo') @ state)
         h = self.h_echo if token in ('Iz_echo', 'Dz') else self.h_ising
         return -1j*h[:, None]*state
+
+    def evolve_suzuki_trotter(self, state, time, *, order=1):
+        """One fully echoed step toward H_even,z + H_even,x, starting in z.
+
+        Order 1 applies Z(t), X(t); order 2 applies Z(t/2), X(t), Z(t/2)
+        chronologically. Each factor is a frame-restored midpoint echo of the
+        full multibody interaction: all odd Pauli orders cancel, even orders
+        and the constant remain. Total native interaction time is 2*t.
+        The explicit order-1 pulse sequence differs only by a global 2*pi
+        spin-rotation phase, which is omitted here.
+        """
+        if order not in (1, 2):
+            raise ValueError('order must be 1 or 2.')
+        if not np.isfinite(time):
+            raise ValueError('time must be finite.')
+        return self._apply_gate(state, f'SuzukiTrotter{order}', time)
+
+    def _gate_jet(self, state, token, value, nfirst, second=False):
+        """Return U a, U' a[:nfirst], and optionally U'' a[:1]."""
+        if token not in self._trotter_factors:
+            evolved = self._apply_gate(state, token, value)
+            first = self._gate_derivative(evolved[:, :nfirst], token)
+            diagonal = self._gate_derivative(first[:, :1], token) if second else None
+            return evolved, first, diagonal
+        a = self._as_column_state(state)
+        first = np.zeros_like(a[:, :nfirst], dtype=complex)
+        diagonal = np.zeros_like(a[:, :1], dtype=complex) if second else None
+        for primitive, scale in self._trotter_factors[token]:
+            a = self._apply_gate(a, primitive, scale*value)
+            first = self._apply_gate(first, primitive, scale*value)
+            source = scale*self._gate_derivative(a[:, :nfirst], primitive)
+            if second:
+                diagonal = (self._apply_gate(diagonal, primitive, scale*value)
+                            + 2*scale*self._gate_derivative(first[:, :1], primitive)
+                            + scale*self._gate_derivative(source[:, :1], primitive))
+            first = first + source
+        return a, first, diagonal
 
     def run_sequence(self, theta, gate_sequence, *, state=None, gradient=False):
         """One parameter per gate; returns psi or (psi, dpsi/dtheta).
@@ -335,10 +384,11 @@ class ConstructSquareArray:
         if a.shape[1] != 1 or not np.all(np.isfinite(a)) or not np.isclose(np.linalg.norm(a), 1):
             raise ValueError('Initial state must be one finite, normalized vector.')
         for token, value in zip(gate_sequence, theta):
-            a = self._apply_gate(a, token, value)
             if gradient:
-                derivative = self._gate_derivative(a[:, :1], token)
+                a, derivative, _ = self._gate_jet(a, token, value, 1)
                 a = np.concatenate((a, derivative), axis=1)
+            else:
+                a = self._apply_gate(a, token, value)
         return (a[:, 0], a[:, 1:].T) if gradient else a[:, 0]
 
     def _run_sequence_second_order(self, theta, gate_sequence):
@@ -351,10 +401,8 @@ class ConstructSquareArray:
         a = self._initial_state.copy()
         pairs = []
         for k, (token, value) in enumerate(zip(gate_sequence, theta)):
-            a = self._apply_gate(a, token, value)
             # New first derivative and mixed derivatives with previous gates.
-            new = self._gate_derivative(a[:, :k+1], token)
-            diagonal = self._gate_derivative(new[:, :1], token)
+            a, new, diagonal = self._gate_jet(a, token, value, k+1, second=True)
             a = np.concatenate((a[:, :k+1], new[:, :1], a[:, k+1:],
                                 new[:, 1:], diagonal), axis=1)
             pairs.extend((i, k) for i in range(k+1))

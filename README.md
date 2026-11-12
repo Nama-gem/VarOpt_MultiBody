@@ -30,6 +30,57 @@ diagonalizations are not used here. `Ix` below uses the full many-body
 interaction coefficients, rather than the old soft-core pair potential.
 `XY` and `XY_echo` use the many-body-derived pair coefficients described below.
 
+## Echoed Suzuki-Trotter gates
+
+`SuzukiTrotter1` and `SuzukiTrotter2` each take **one shared time parameter t**.
+In chronological order their frame-restored factors are:
+
+| Gate | Echoed factors | Native interaction applications | Total native time |
+|---|---|---|---|
+| `SuzukiTrotter1` | `Iz_echo(t)`, `Ix_echo(t)` | 4 | `2*t` |
+| `SuzukiTrotter2` | `Iz_echo(t/2)`, `Ix_echo(t)`, `Iz_echo(t/2)` | 6 | `2*t` |
+
+Both start with z evolution, so the first interaction acts nontrivially on
+the default x-polarized initial state. They approximate evolution for time t
+under `H_even,z + H_even,x`, with local errors O(t^2) and O(t^3), respectively.
+These are **ZZ+XX**, using y-axis basis rotations, not ZZ+YY. Every even
+multibody Pauli term (and the constant) from the original cluster expansion
+is retained; midpoint echoes cancel all odd Pauli terms, not just local fields.
+Thus the target includes higher-body terms, not solely pairwise ZZ+XX.
+
+The first-order gate is equivalent, up to a global spin-rotation phase, to
+the chronological native sequence
+`Iz(t/2), Ry(pi), Iz(t/2), Ry(pi/2), Iz(t/2), Ry(pi), Iz(t/2), Ry(-pi/2)`.
+The second-order gate uses
+`Iz(t/4), Ry(pi), Iz(t/4), Ry(pi/2), Iz(t/2), Ry(pi), Iz(t/2), Ry(pi/2), Iz(t/4), Ry(pi), Iz(t/4)`.
+Ideal echoes are evaluated directly with the existing even-order Hamiltonian.
+Analytic gradients and Hessians include the product-rule terms for the shared
+time; a composite gate is not treated as one constant-generator exponential.
+
+```python
+gates = ['SuzukiTrotter2', 'Rx', 'SuzukiTrotter2']
+theta = [20., .4, 15.]
+xi, grad, hess = arr.evaluate_gate_sequence_squeezing(theta, gates, hessian=True)
+psi = arr.evolve_suzuki_trotter(arr._initial_state, 20., order=2)
+```
+
+`cluster_optimization_SuzukiTrotter.py` mirrors the Ising cluster driver:
+4x4 open geometry, cluster order n=12, Rb = 1.5, 2, 2.5, 3,
+Omega/Delta = 1/2, 1/3, 1/5, 1/7, 1/10, and 1 through 5 layers.
+Each layer has one composite interaction time, with variational Rx rotations
+only between layers (2*layers-1 parameters). The same single-Iz_echo minimum
+sets the time bound `0 <= t <= 1.5*single_pulse_min_time`.
+No merging across intervening variational rotations is performed.
+
+Submit `sbatch jobscript_SuzukiTrotter.sh` on the configured cluster.
+Array IDs 0..99 select first order; 100..199 select second order, with the
+original Rb/ratio/layer ordering within each half. Results and warm starts are
+isolated under `results_SuzukiTrotter/order_1/` and `order_2/`.
+The new driver defaults to 1000 Latin-hypercube starts per task, with warm
+starts disabled so a fresh sweep does not require preexisting summaries.
+Enable `USE_WARM_START` after results exist; only shared interaction times
+are rescaled, while Rx angles are copied unchanged.
+
 ## Project layout and notebook
 
 ```text
