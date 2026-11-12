@@ -1,9 +1,10 @@
 """Fully echoed multibody ZZ+XX Suzuki-Trotter optimization.
 
-SLURM_ARRAY_TASK_ID=0..199 covers order 1 (0..99) and order 2 (100..199),
+SLURM_ARRAY_TASK_ID=0..299 covers orders 1, 2 and 3 in blocks of 100,
 with the same Rb, Omega/Delta and layer grid as cluster_optimization_Ising.
-Each layer has one time t (total native interaction time 2*t); Rx rotations
-appear only between layers. Both orders begin with a z interaction.
+Each layer has one shared time t; Rx rotations appear only between layers.
+All orders begin with z evolution. Order 3 uses signed interaction steps
+(requires interaction-sign reversal); absolute time is 41*t/12, vs 2*t for 1/2.
 """
 
 import os
@@ -41,7 +42,8 @@ OMEGA_DELTA_RATIOS = [
     (1, 10),
 ]
 
-TROTTER_ORDERS = (1, 2)
+TROTTER_ORDERS = (1, 2, 3)
+WARM_START_TROTTER_ORDERS = (1, 2, 3)
 
 MAX_LAYERS = 5
 
@@ -82,7 +84,7 @@ save_best = True
 #
 # Warm-start parameter vectors are NOT loaded here.
 # They are loaded immediately before their optimization begins.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only the shared Suzuki-Trotter gate durations.
@@ -239,7 +241,7 @@ def run_malloc_trim():
 # Warm-start settings
 # ============================================================
 
-USE_WARM_START = False  # Enable after this sweep has generated summaries.
+USE_WARM_START = True
 
 
 WARM_START_RB_VALUES = [
@@ -412,7 +414,7 @@ def save_summary_atomic(
 def gate_sequence(n_layers, ub_Ising, trotter_order=1):
     """One shared interaction time per layer, separated by variational Rx."""
     if trotter_order not in TROTTER_ORDERS:
-        raise ValueError("trotter_order must be 1 or 2")
+        raise ValueError("trotter_order must be 1, 2 or 3")
     sequence, bounds = [], []
     for layer in range(n_layers):
         if layer > 0:
@@ -557,6 +559,28 @@ def get_single_pulse_min_time(
 # Warm start
 # ============================================================
 
+def build_warm_start_jobs(results_root, Rb, numerator, denominator, trotter_order):
+    """Schedule sources, including other orders at the same physical point.
+
+    Read summaries later, immediately before optimization, so concurrent jobs
+    can supply improved parameters. Only the identical target case is skipped.
+    """
+    jobs = []
+    for source_order in WARM_START_TROTTER_ORDERS:
+        for source_Rb in WARM_START_RB_VALUES:
+            for source_num, source_den in WARM_START_OMEGA_DELTA_RATIOS:
+                if (source_order == trotter_order and np.isclose(source_Rb, Rb)
+                        and (source_num, source_den) == (numerator, denominator)):
+                    continue
+                jobs.append(dict(
+                    type="warm_start", source_order=source_order, source_Rb=source_Rb,
+                    source_numerator=source_num, source_denominator=source_den,
+                    source_ratio_dir=parameter_directory(
+                        Path(results_root) / f"order_{source_order}", LX, LY,
+                        source_Rb, source_num, source_den)))
+    return jobs
+
+
 def load_warm_start(
     source_ratio_dir,
     n_layers,
@@ -616,7 +640,7 @@ def load_warm_start(
     )
 
     with np.load(
-        summary_file
+        summary_file, allow_pickle=False
     ) as data:
 
         x0 = np.asarray(
@@ -687,6 +711,11 @@ def load_warm_start(
     # Check parameter count
     # --------------------------------------------------------
 
+    if source_layers != n_layers:
+        raise ValueError("Warm-start layer count does not match target.")
+    if x0.ndim != 1 or not np.all(np.isfinite(x0)):
+        raise ValueError("Warm-start parameters must be a finite vector.")
+
     if len(x0) != len(
         target_sequence
     ):
@@ -706,6 +735,12 @@ def load_warm_start(
 
     if rescale_ising:
 
+        if (not np.isfinite(source_single_pulse_min_time)
+                or source_single_pulse_min_time <= 0
+                or not np.isfinite(target_single_pulse_min_time)
+                or target_single_pulse_min_time <= 0):
+            raise ValueError("Warm-start time scales must be positive and finite.")
+
         scale = (
             target_single_pulse_min_time
             / source_single_pulse_min_time
@@ -724,6 +759,7 @@ def load_warm_start(
             if gate in (
                 "SuzukiTrotter1",
                 "SuzukiTrotter2",
+                "SuzukiTrotter3",
             ):
 
                 x0[i] *= scale
@@ -1091,76 +1127,8 @@ def main():
     # --------------------------------------------------------
 
     if USE_WARM_START:
-
-        for source_Rb in WARM_START_RB_VALUES:
-
-            for (
-                source_numerator,
-                source_denominator,
-            ) in WARM_START_OMEGA_DELTA_RATIOS:
-
-
-                # --------------------------------------------
-                # Skip target point itself
-                # --------------------------------------------
-
-                if (
-                    np.isclose(
-                        source_Rb,
-                        Rb,
-                    )
-                    and source_numerator
-                    == numerator
-                    and source_denominator
-                    == denominator
-                ):
-
-                    print()
-                    print(
-                        "Skipping warm start from target "
-                        "point itself:"
-                    )
-
-                    print(
-                        f"Rb = {source_Rb}, "
-                        f"Omega/Delta = "
-                        f"{source_numerator}/"
-                        f"{source_denominator}"
-                    )
-
-                    continue
-
-
-                # --------------------------------------------
-                # Store source location only
-                # --------------------------------------------
-
-                source_ratio_dir = (
-                    parameter_directory(
-                        base_dir=results_base_dir,
-                        Lx=LX,
-                        Ly=LY,
-                        Rb=source_Rb,
-                        numerator=source_numerator,
-                        denominator=source_denominator,
-                    )
-                )
-
-                optimization_jobs.append(
-                    {
-                        "type": "warm_start",
-                        "source_Rb": source_Rb,
-                        "source_numerator": (
-                            source_numerator
-                        ),
-                        "source_denominator": (
-                            source_denominator
-                        ),
-                        "source_ratio_dir": (
-                            source_ratio_dir
-                        ),
-                    }
-                )
+        optimization_jobs.extend(build_warm_start_jobs(
+            results_base_dir.parent, Rb, numerator, denominator, trotter_order))
 
 
     # --------------------------------------------------------
@@ -1323,6 +1291,8 @@ def main():
         # ====================================================
 
         if job["type"] == "warm_start":
+
+            print(f"Warm-start source order: {job['source_order']}")
 
             source_Rb = (
                 job["source_Rb"]

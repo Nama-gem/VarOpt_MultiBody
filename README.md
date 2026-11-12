@@ -32,7 +32,7 @@ interaction coefficients, rather than the old soft-core pair potential.
 
 ## Echoed Suzuki-Trotter gates
 
-`SuzukiTrotter1` and `SuzukiTrotter2` each take **one shared time parameter t**.
+`SuzukiTrotter1`, `SuzukiTrotter2` and `SuzukiTrotter3` each take **one shared time parameter t**.
 In chronological order their frame-restored factors are:
 
 | Gate | Echoed factors | Native interaction applications | Total native time |
@@ -40,9 +40,16 @@ In chronological order their frame-restored factors are:
 | `SuzukiTrotter1` | `Iz_echo(t)`, `Ix_echo(t)` | 4 | `2*t` |
 | `SuzukiTrotter2` | `Iz_echo(t/2)`, `Ix_echo(t)`, `Iz_echo(t/2)` | 6 | `2*t` |
 
-Both start with z evolution, so the first interaction acts nontrivially on
+All start with z evolution, so the first interaction acts nontrivially on
 the default x-polarized initial state. They approximate evolution for time t
-under `H_even,z + H_even,x`, with local errors O(t^2) and O(t^3), respectively.
+under `H_even,z + H_even,x`, with local errors O(t^2), O(t^3) and O(t^4), respectively.
+Order 3 uses the chronological Ruth splitting
+`Z(7*t/24), X(2*t/3), Z(3*t/4), X(-2*t/3), Z(-t/24), X(t)`,
+where every Z/X factor is fully echoed. It requires 12 native interaction
+applications and absolute interaction time `41*abs(t)/12`. **Negative steps
+require reversal of the native interaction sign; ordinary echo pulses do not
+provide this.** This is a simulation option unless that control is available.
+
 These are **ZZ+XX**, using y-axis basis rotations, not ZZ+YY. Every even
 multibody Pauli term (and the constant) from the original cluster expansion
 is retained; midpoint echoes cancel all odd Pauli terms, not just local fields.
@@ -73,13 +80,24 @@ sets the time bound `0 <= t <= 1.5*single_pulse_min_time`.
 No merging across intervening variational rotations is performed.
 
 Submit `sbatch jobscript_SuzukiTrotter.sh` on the configured cluster.
-Array IDs 0..99 select first order; 100..199 select second order, with the
+Array IDs 0..99 select first order; 100..199 second order; 200..299 third order, with the
 original Rb/ratio/layer ordering within each half. Results and warm starts are
-isolated under `results_SuzukiTrotter/order_1/` and `order_2/`.
-The new driver defaults to 1000 Latin-hypercube starts per task, with warm
-starts disabled so a fresh sweep does not require preexisting summaries.
-Enable `USE_WARM_START` after results exist; only shared interaction times
-are rescaled, while Rx angles are copied unchanged.
+isolated under `results_SuzukiTrotter/order_1/`, `order_2/`, and `order_3/`.
+The driver enables warm starts across all three orders and physical parameter
+points at the same layer count, plus the configured Latin-hypercube starts
+(currently 100 per task). `WARM_START_TROTTER_ORDERS` controls source orders.
+Only the identical target case is excluded (59 candidate warm-start sources).
+Missing source summaries are skipped; available summaries are read immediately
+before their optimization. Shared times are rescaled by the single-Ising
+calibration-time ratio and clipped to target bounds; Rx angles are unchanged
+except for bound projection. No order-dependent time rescaling is needed:
+each gate's signed z and x coefficients sum to one. Set
+`WARM_START_INCLUDE_LHS=False` for warm-start-only runs once summaries exist.
+
+To run only the new order on the cluster:
+`sbatch --array=200-299 jobscript_SuzukiTrotter.sh`.
+The default submission covers all 300 cases. Existing order-1/2 paths and task
+IDs are unchanged; the best-result saving mechanism is unchanged.
 
 ## Project layout and notebook
 

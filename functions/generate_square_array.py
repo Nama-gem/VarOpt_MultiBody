@@ -23,11 +23,16 @@ class ConstructSquareArray:
     at construction: build a new object when changing the interaction.
     """
     gates = ('Rx', 'Ry', 'Rz', 'Iz', 'Iz_echo', 'Dz', 'Ix', 'Ix_echo', 'XY', 'XY_echo',
-             'SuzukiTrotter1', 'SuzukiTrotter2')
+             'SuzukiTrotter1', 'SuzukiTrotter2', 'SuzukiTrotter3')
     # Chronological factors; all durations share the single gate parameter t.
     _trotter_factors = {
         'SuzukiTrotter1': (('Iz_echo', 1.), ('Ix_echo', 1.)),
         'SuzukiTrotter2': (('Iz_echo', .5), ('Ix_echo', 1.), ('Iz_echo', .5)),
+        # Ruth third-order splitting, chronological; negative steps require
+        # reversing the native interaction, not an additional spin echo.
+        'SuzukiTrotter3': (('Iz_echo', 7/24), ('Ix_echo', 2/3),
+                           ('Iz_echo', 3/4), ('Ix_echo', -2/3),
+                           ('Iz_echo', -1/24), ('Ix_echo', 1.)),
     }
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
@@ -342,12 +347,14 @@ class ConstructSquareArray:
         Order 1 applies Z(t), X(t); order 2 applies Z(t/2), X(t), Z(t/2)
         chronologically. Each factor is a frame-restored midpoint echo of the
         full multibody interaction: all odd Pauli orders cancel, even orders
-        and the constant remain. Total native interaction time is 2*t.
+        and the constant remain. Orders 1/2 use total native time 2*abs(t). Order 3 is a Ruth
+        splitting with signed steps: total absolute native time 41*abs(t)/12.
+        Its negative steps require physical interaction-sign reversal.
         The explicit order-1 pulse sequence differs only by a global 2*pi
         spin-rotation phase, which is omitted here.
         """
-        if order not in (1, 2):
-            raise ValueError('order must be 1 or 2.')
+        if order not in (1, 2, 3):
+            raise ValueError('order must be 1, 2 or 3.')
         if not np.isfinite(time):
             raise ValueError('time must be finite.')
         return self._apply_gate(state, f'SuzukiTrotter{order}', time)
