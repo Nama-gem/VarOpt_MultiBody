@@ -45,7 +45,7 @@ TROTTER_ORDERS = (1, 2)
 
 MAX_LAYERS = 5
 
-N_INITIAL_CONDITIONS = 1000
+N_INITIAL_CONDITIONS = 100
 LHS_SEED_BASE = None
 
 
@@ -59,8 +59,8 @@ use_hessian = False
 # method = "SLSQP"
 # use_hessian = False
 
-method = "trust-constr"
-use_hessian = True
+# method = "trust-constr"
+# use_hessian = True
 
 options = {
     "maxiter": 1000,
@@ -82,7 +82,7 @@ save_best = True
 #
 # Warm-start parameter vectors are NOT loaded here.
 # They are loaded immediately before their optimization begins.
-WARM_START_INCLUDE_LHS = False
+WARM_START_INCLUDE_LHS = True
 
 
 # If True, rescale only the shared Suzuki-Trotter gate durations.
