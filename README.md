@@ -93,10 +93,13 @@ Submit `sbatch jobscript_SuzukiTrotter.sh` on the configured cluster.
 Array IDs 0..99 select first order; 100..199 second order; 200..299 third order; 300..399 fourth order, with the
 original Rb/ratio/layer ordering within each half. Results and warm starts are
 isolated under `results_SuzukiTrotter/order_1/`, `order_2/`, `order_3/`, and `order_4/`.
-The driver enables warm starts across all four orders and physical parameter
-points at the same layer count. `WARM_START_INCLUDE_LHS` enables additional
+The driver uses immediate neighbors in the configured Rb, Omega/Delta, and
+Trotter-order lists, changing exactly one coordinate at a time and keeping the
+layer count fixed. For example, ratio 1/5 neighbors 1/3 and 1/7. `WARM_START_INCLUDE_LHS` enables additional
 Latin-hypercube starts; it is currently False (warm-start-only runs). `WARM_START_TROTTER_ORDERS` controls source orders.
-Only the identical target case is excluded (79 candidate warm-start sources).
+There are at most 6 candidate sources (3 at grid corners). Diagonal neighbors
+and the target itself are excluded. The warm-start source lists can filter out
+neighbors without making more distant points eligible.
 Missing source summaries are skipped; available summaries are read immediately
 before their optimization. Shared times are rescaled by the single-Ising
 calibration-time ratio and clipped to target bounds; Rx angles are unchanged

@@ -560,24 +560,40 @@ def get_single_pulse_min_time(
 # ============================================================
 
 def build_warm_start_jobs(results_root, Rb, numerator, denominator, trotter_order):
-    """Schedule sources, including other orders at the same physical point.
+    """Schedule immediate grid neighbors, changing exactly one coordinate.
 
-    Read summaries later, immediately before optimization, so concurrent jobs
-    can supply improved parameters. Only the identical target case is skipped.
+    Adjacency follows the sweep lists, not numerical differences: e.g. 1/5
+    neighbors 1/3 and 1/7. Warm-start source lists only filter these neighbors;
+    they never bridge over an excluded grid point. The layer count is fixed
+    by the caller. Missing files are skipped when each job is executed.
     """
+    grids = (RB_VALUES, OMEGA_DELTA_RATIOS, TROTTER_ORDERS)
+    rb_matches = [i for i, value in enumerate(RB_VALUES) if np.isclose(value, Rb)]
+    if len(rb_matches) != 1:
+        raise ValueError("Target Rb must match exactly one sweep-grid point.")
+    target = (rb_matches[0], OMEGA_DELTA_RATIOS.index((numerator, denominator)),
+              TROTTER_ORDERS.index(trotter_order))
     jobs = []
-    for source_order in WARM_START_TROTTER_ORDERS:
-        for source_Rb in WARM_START_RB_VALUES:
-            for source_num, source_den in WARM_START_OMEGA_DELTA_RATIOS:
-                if (source_order == trotter_order and np.isclose(source_Rb, Rb)
-                        and (source_num, source_den) == (numerator, denominator)):
-                    continue
-                jobs.append(dict(
-                    type="warm_start", source_order=source_order, source_Rb=source_Rb,
-                    source_numerator=source_num, source_denominator=source_den,
-                    source_ratio_dir=parameter_directory(
-                        Path(results_root) / f"order_{source_order}", LX, LY,
-                        source_Rb, source_num, source_den)))
+    for axis, grid in enumerate(grids):
+        for offset in (-1, 1):
+            index = target[axis] + offset
+            if not 0 <= index < len(grid):
+                continue
+            indices = list(target)
+            indices[axis] = index
+            source_Rb = RB_VALUES[indices[0]]
+            source_num, source_den = OMEGA_DELTA_RATIOS[indices[1]]
+            source_order = TROTTER_ORDERS[indices[2]]
+            if (not any(np.isclose(source_Rb, value) for value in WARM_START_RB_VALUES)
+                    or (source_num, source_den) not in WARM_START_OMEGA_DELTA_RATIOS
+                    or source_order not in WARM_START_TROTTER_ORDERS):
+                continue
+            jobs.append(dict(
+                type="warm_start", source_order=source_order, source_Rb=source_Rb,
+                source_numerator=source_num, source_denominator=source_den,
+                source_ratio_dir=parameter_directory(
+                    Path(results_root) / f"order_{source_order}", LX, LY,
+                    source_Rb, source_num, source_den)))
     return jobs
 
 
