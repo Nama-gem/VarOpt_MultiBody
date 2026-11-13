@@ -65,7 +65,7 @@ use_hessian = False
 # use_hessian = True
 
 options = {
-    "maxiter": 1000,
+    "maxiter": 10,
 }
 
 save_best = True
