@@ -5,6 +5,7 @@ paper convention is +Delta n_r + C6 n_r n_r/r**6 + Omega X/2.
 Computational bit i=1 means sigma_z,i=+1 (the dressed spin state).
 """
 from collections import OrderedDict
+from pathlib import Path
 import numpy as np
 from scipy.optimize import minimize
 from scipy.sparse.linalg import expm_multiply, LinearOperator
@@ -47,7 +48,8 @@ class ConstructSquareArray:
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
                  max_clusters=1_000_000, convention='paper', boundary='open',
-                 backend='quspin', use_reflections=True, interaction_cache_dir=None):
+                 backend='quspin', use_reflections=True, interaction_cache_dir=None,
+                 geometry_cache_dir=None):
         if any(type(v) is not int or v < 1 for v in (Lx, Ly, n, max_sites)):
             raise ValueError('Lx, Ly, n and max_sites must be positive integers.')
         if n > Lx*Ly or Lx*Ly > max_sites:
@@ -97,7 +99,9 @@ class ConstructSquareArray:
         self._ground_state = np.zeros((self.dim, 1), complex)
         self._ground_state[0] = 1
         if backend == 'quspin':
-            self._build_quspin_basis()
+            if geometry_cache_dir is None and interaction_cache_dir is not None:
+                geometry_cache_dir = Path(interaction_cache_dir) / 'geometry'
+            self._build_quspin_basis(geometry_cache_dir)
         # XY is optional and more costly to construct than diagonal Ising.
         # Share one exchange operator between its bare and echoed variants.
         self._xy_operators = None
@@ -105,11 +109,10 @@ class ConstructSquareArray:
         self._phase_cache = OrderedDict()
         self._fixed_rotation_generators = {}
 
-    def _build_quspin_basis(self):
+    def _build_quspin_basis(self, cache_dir=None):
         """Even x/y spatial-reflection sectors; no magnetization or spin parity restriction."""
         try:
             from quspin.basis import spin_basis_general
-            from quspin.operators import hamiltonian
         except ImportError as exc:
             raise ImportError('Install quspin, or select backend="numpy" for the full basis.') from exc
         sites = np.arange(self._L)
@@ -123,6 +126,27 @@ class ConstructSquareArray:
         self._basis = spin_basis_general(self._L, pauli=0, **blocks)
         self.basis = self._basis
         self.dim = self._basis.Ns
+        if cache_dir is None:
+            data = self._construct_quspin_geometry()
+        else:
+            from .geometry_cache import cached_geometry
+            data = cached_geometry(cache_dir, self._Lx, self._Ly, self.use_reflections,
+                                   self._basis.states, self._construct_quspin_geometry, __file__)
+        self._basis_masks = data['basis_masks']
+        self._quspin_rows = data['quspin_rows']
+        self._projector = data['projector']
+        self._initial_state = data['initial_state']
+        self._ground_state = data['ground_state']
+        self._spin_flip = data['spin_flip']
+        self.op = {name: data[name] for name in ('Jx', 'Jy', 'Jz')}
+        self.h_ising = self.h_ising[self._basis_masks]
+        self.h_echo = self.h_echo[self._basis_masks]
+        self._jz = self._jz[self._basis_masks]
+
+    def _construct_quspin_geometry(self):
+        """Build model-independent sparse operators and state/basis maps once."""
+        from quspin.operators import hamiltonian
+        data = {}
         # QuSpin site i is bit N-1-i and full rows are in descending order.
         # Explicit conversion preserves this module's public bit-i convention.
         def reverse_bits(values):
@@ -131,31 +155,30 @@ class ConstructSquareArray:
                 result |= ((values >> i) & 1) << (self._L-1-i)
             return result
         representatives = reverse_bits(self._basis.states.astype(np.int64))
-        self._basis_masks = representatives
-        self.h_ising = self.h_ising[representatives]
-        self.h_echo = self.h_echo[representatives]
-        self._jz = self._jz[representatives]
-        self._quspin_rows = self.full_dim-1-reverse_bits(np.arange(self.full_dim))
+        data['basis_masks'] = representatives
+        data['quspin_rows'] = self.full_dim-1-reverse_bits(np.arange(self.full_dim))
         projector = self._basis.get_proj(np.float64)
-        self._initial_state = np.asarray(projector.T @ np.full(self.full_dim, 1/np.sqrt(self.full_dim)),
+        data['initial_state'] = np.asarray(projector.T @ np.full(self.full_dim, 1/np.sqrt(self.full_dim)),
                                          dtype=complex)[:, None]
-        self._ground_state = np.asarray(projector.getrow(self.full_dim-1).toarray().T, dtype=complex)
+        data['ground_state'] = np.asarray(projector.getrow(self.full_dim-1).toarray().T, dtype=complex)
         # Spin inversion preserves spatial reflection sectors. Cache its exact
         # reduced permutation for Dz instead of exponentiating a pi rotation.
         flip = (projector.T @ projector[::-1]).tocsr()
-        self._spin_flip = flip
-        self.op = {}
+        data['spin_flip'] = flip
         for axis in 'xyz':
-            self.op['J'+axis] = hamiltonian(
+            data['J'+axis] = hamiltonian(
                 [[axis, [[1., i] for i in range(self._L)]]], [], basis=self._basis,
                 dtype=np.complex128, check_symm=False, check_herm=False, check_pcon=False).tocsr()
+
+        data['projector'] = projector.tocsr()
+        return data
 
     def to_full(self, state):
         """Expand column states to ascending bit-i computational order."""
         a = self._as_column_state(state)
         if self.backend == 'numpy':
             return a.copy()
-        return np.asarray(self._basis.get_proj(np.float64) @ a)[self._quspin_rows]
+        return np.asarray(self._projector @ a)[self._quspin_rows]
 
     def from_full(self, state):
         """Project full column states; reject components outside the selected sector."""
@@ -168,7 +191,7 @@ class ConstructSquareArray:
             return a.copy()
         native = np.empty_like(a)
         native[self._quspin_rows] = a
-        projector = self._basis.get_proj(np.float64)
+        projector = self._projector
         reduced = np.asarray(projector.T @ native)
         if not np.allclose(projector @ reduced, native, atol=1e-12, rtol=1e-10):
             raise ValueError('State is outside the selected reflection sectors; use_reflections=False is required.')

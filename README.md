@@ -654,9 +654,32 @@ the 4x4 reflection-reduced basis) and the two fixed y-rotation sparse
 generators. There is no dense-unitary cache or unbounded state-history cache.
 As before, SciPy objective/gradient/Hessian calls share their latest objective
 evaluation, and the scanned single-gate minimum has its own persistent cache.
-QuSpin bases and collective operators are built once per array, not per
-optimization start; they are not serialized across software environments.
+QuSpin basis objects are built normally once per array. Numeric geometry
+operators and projectors are cached as described below; no QuSpin object is
+serialized across software environments.
 
 A local 3x2, n=4, two-fourth-order-gate benchmark measured approximately 2.7x
 speedup with gradients and 2.0x with an exact Hessian. These are small-system
 measurements, not a prediction for the full 4x4, n=12 cluster workload.
+
+### Geometry initialization cache
+
+When `interaction_cache_dir` is set, the array also caches its geometry data
+under that directory's `geometry/` subdirectory. The Suzuki cluster driver
+therefore enables it automatically. Alternatively, pass `geometry_cache_dir`
+to `ConstructSquareArray` to cache geometry independently of interactions.
+With both cache-directory arguments omitted, initialization remains uncached.
+
+Cached data include sparse Jx/Jy/Jz operators, the symmetry-sector projector,
+spin-inversion operator, basis index mappings, and initial/ground-state vectors.
+They are reused across Rb, Omega, cluster orders and boundary conditions when
+the geometry, reflection settings and actual QuSpin basis ordering match.
+Physical Hamiltonian diagonals are still constructed separately per model.
+The projector is also retained for repeated `to_full`/`from_full` calls.
+
+The numeric-only NPZ cache uses locks and atomic replacement, never pickle.
+Its key includes geometry, reflection settings, basis ordering, NumPy/SciPy/
+QuSpin versions and the array module source hash. A fresh QuSpin basis object
+is always constructed; only matching numeric operators are restored. Each
+array gets independent mutable buffers. A 4x4 reflection-reduced geometry
+cache occupies about 13 MB on disk, shared by all its physical parameter cases.
