@@ -4,6 +4,7 @@ Units: a=Delta=hbar=1, Rb=(C6/(2 Delta))**(1/6). The default
 paper convention is +Delta n_r + C6 n_r n_r/r**6 + Omega X/2.
 Computational bit i=1 means sigma_z,i=+1 (the dressed spin state).
 """
+from collections import OrderedDict
 import numpy as np
 from scipy.optimize import minimize
 from scipy.sparse.linalg import expm_multiply, LinearOperator
@@ -46,7 +47,7 @@ class ConstructSquareArray:
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
                  max_clusters=1_000_000, convention='paper', boundary='open',
-                 backend='quspin', use_reflections=True):
+                 backend='quspin', use_reflections=True, interaction_cache_dir=None):
         if any(type(v) is not int or v < 1 for v in (Lx, Ly, n, max_sites)):
             raise ValueError('Lx, Ly, n and max_sites must be positive integers.')
         if n > Lx*Ly or Lx*Ly > max_sites:
@@ -67,9 +68,14 @@ class ConstructSquareArray:
         self.dim = 1 << self._L
         self.full_dim = self.dim
         sign = -1 if convention == 'paper' else 1
-        self.interactions = calculate_interactions(
-            Lx, Ly, n, omega=Omega, delta=sign, c6=sign*2*Rb**6,
-            max_clusters=max_clusters, boundary=boundary)
+        interaction_kwargs = dict(omega=Omega, delta=sign, c6=sign*2*Rb**6,
+                                  max_clusters=max_clusters, boundary=boundary)
+        if interaction_cache_dir is None:
+            self.interactions = calculate_interactions(Lx, Ly, n, **interaction_kwargs)
+        else:
+            from .interaction_cache import cached_interactions
+            self.interactions = cached_interactions(
+                interaction_cache_dir, Lx, Ly, n, **interaction_kwargs)
         self.occupation = self.interactions['occupation']
         self.pauli_z = {s: v / 2**len(s) for s, v in self.interactions['ising'].items()}
         self.pauli_z_even = {s: v for s, v in self.pauli_z.items() if len(s) % 2 == 0}
@@ -95,6 +101,9 @@ class ConstructSquareArray:
         # XY is optional and more costly to construct than diagonal Ising.
         # Share one exchange operator between its bare and echoed variants.
         self._xy_operators = None
+        # Bounded vector cache: never retain state/derivative histories or dense unitaries.
+        self._phase_cache = OrderedDict()
+        self._fixed_rotation_generators = {}
 
     def _build_quspin_basis(self):
         """Even x/y spatial-reflection sectors; no magnetization or spin parity restriction."""
@@ -204,8 +213,16 @@ class ConstructSquareArray:
         if axis not in ('x', 'y'):
             raise ValueError('axis must be x, y or z.')
         if self.backend == 'quspin':
-            generator = (-1j*angle)*self.op['J'+axis]
-            return expm_multiply(generator, a, traceA=generator.diagonal().sum())
+            key = (axis, float(angle))
+            if axis == 'y' and abs(angle) == np.pi/2:
+                if key not in self._fixed_rotation_generators:
+                    generator = (-1j*angle)*self.op['J'+axis]
+                    self._fixed_rotation_generators[key] = (generator, generator.diagonal().sum())
+                generator, trace = self._fixed_rotation_generators[key]
+            else:
+                generator = (-1j*angle)*self.op['J'+axis]
+                trace = generator.diagonal().sum()
+            return expm_multiply(generator, a, traceA=trace)
         c, s = np.cos(angle/2), np.sin(angle/2)
         for i in range(self._L):
             block = a.reshape(-1, 2, 1 << i, a.shape[1])
@@ -222,8 +239,20 @@ class ConstructSquareArray:
         """
         if not np.isfinite(time):
             raise ValueError('time must be finite.')
-        h = self.h_echo if echo else self.h_ising
-        return np.exp(-1j*time*h)[:, None] * self._as_column_state(state)
+        return self._ising_phase(time, echo=echo)[:, None] * self._as_column_state(state)
+
+    def _ising_phase(self, time, *, echo):
+        """Cache at most eight diagonal phase vectors for the fixed model."""
+        key = (bool(echo), float(time))
+        if key not in self._phase_cache:
+            h = self.h_echo if echo else self.h_ising
+            phase = np.exp(-1j*time*h)
+            phase.flags.writeable = False
+            self._phase_cache[key] = phase
+            if len(self._phase_cache) > 8:
+                self._phase_cache.popitem(last=False)
+        self._phase_cache.move_to_end(key)
+        return self._phase_cache[key]
 
     def evolve_x(self, state, time, *, echo=False):
         """Many-body Ising evolution with every z-product replaced by x.
@@ -379,17 +408,30 @@ class ConstructSquareArray:
             diagonal = self._gate_derivative(first[:, :1], token) if second else None
             return evolved, first, diagonal
         a = self._as_column_state(state)
-        first = np.zeros_like(a[:, :nfirst], dtype=complex)
-        diagonal = np.zeros_like(a[:, :1], dtype=complex) if second else None
+        width = a.shape[1]
+        # Carry all derivative columns through each basis change together.
+        # Inside that basis U, U' and U'' are just diagonal multiplications.
+        blocks = [a, np.zeros_like(a[:, :nfirst], dtype=complex)]
+        if second:
+            blocks.append(np.zeros_like(a[:, :1], dtype=complex))
+        packed = np.concatenate(blocks, axis=1)
+        generator = -1j*self.h_echo[:, None]
         for primitive, scale in self._trotter_factors[token]:
-            a = self._apply_gate(a, primitive, scale*value)
-            first = self._apply_gate(first, primitive, scale*value)
-            source = scale*self._gate_derivative(a[:, :nfirst], primitive)
+            if primitive == 'Ix_echo':
+                packed = self.rotate(packed, 'y', -np.pi/2)
+            packed *= self._ising_phase(scale*value, echo=True)[:, None]
+            a = packed[:, :width]
+            first = packed[:, width:width+nfirst]
+            source = scale*generator*a[:, :nfirst]
             if second:
-                diagonal = (self._apply_gate(diagonal, primitive, scale*value)
-                            + 2*scale*self._gate_derivative(first[:, :1], primitive)
-                            + scale*self._gate_derivative(source[:, :1], primitive))
-            first = first + source
+                packed[:, -1:] += (2*scale*generator*first[:, :1]
+                                    + scale*generator*source[:, :1])
+            first += source
+            if primitive == 'Ix_echo':
+                packed = self.rotate(packed, 'y', np.pi/2)
+        a = packed[:, :width]
+        first = packed[:, width:width+nfirst]
+        diagonal = packed[:, -1:] if second else None
         return a, first, diagonal
 
     def run_sequence(self, theta, gate_sequence, *, state=None, gradient=False):

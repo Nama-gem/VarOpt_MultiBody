@@ -8,6 +8,7 @@ Absolute times are 2*t (orders 1/2), 41*t/12 (3), (7/(2-2**(1/3))-2)*t (4).
 """
 
 import os
+import json
 import gc
 import ctypes
 import tempfile
@@ -15,6 +16,7 @@ from pathlib import Path
 
 import numpy as np
 from scipy.stats import qmc
+from scipy.optimize import minimize_scalar
 
 from functions import ConstructSquareArray, OptimizationResultStore
 import fcntl
@@ -49,6 +51,16 @@ MAX_LAYERS = 5
 
 N_INITIAL_CONDITIONS = 100
 LHS_SEED_BASE = None
+
+# Geometric single-gate scan; reduce GROWTH to resolve narrower minima.
+SINGLE_PULSE_SCAN_START = 0.01
+SINGLE_PULSE_SCAN_GROWTH = 1.15
+SINGLE_PULSE_SCAN_MAX_TIME = 1e6
+SINGLE_PULSE_SCAN_TOL = 1e-10
+SINGLE_PULSE_CALIBRATION = "suzuki_first_minimum_v1"
+
+# Shared across all layer counts and Trotter orders; None disables disk caching.
+INTERACTION_CACHE_DIR = Path(__file__).resolve().parent / "data" / "cache" / "multibody_interactions"
 
 
 # ------------------------------------------------------------
@@ -463,96 +475,98 @@ def sample_lhs(
 # Single-pulse optimization
 # ============================================================
 
-def get_single_pulse_min_time(
-    arr,
-    store,
-    method,
-    use_hessian,
-    options,
-):
+def scan_first_minimum(objective, *, start, growth, max_time, tolerance=1e-10):
+    """Bracket the first resolved decreasing-to-increasing turn, then refine.
 
-    store_dir = Path(
-        store.directory
-    )
+    This is a finite-resolution scan, not a guarantee against arbitrarily
+    narrow unseen minima. Nonfinite values fail rather than bridging a gap.
+    No Hessian is needed at the coherent initial state.
+    """
+    if (not all(np.isfinite(v) for v in (start, growth, max_time, tolerance))
+            or not 0 < start < max_time or growth <= 1 or tolerance < 0):
+        raise ValueError("Require 0 < start < max_time, growth > 1, tolerance >= 0.")
 
-    store_dir.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    def evaluate(t):
+        value = float(objective(float(t)))
+        if not np.isfinite(value):
+            raise ValueError(f"Nonfinite single-gate squeezing at t={t:g}.")
+        return value
 
-    cache_file = (
-        store_dir
-        / "single_pulse_min_time.npy"
-    )
+    times, values = [0.], [evaluate(0.)]
+    t = start
+    # Keep the lowest sample since a resolved descent; wait for a resolved rise.
+    best = None
+    while True:
+        times.append(t)
+        values.append(evaluate(t))
+        k = len(times)-1
+        if best is None:
+            if values[k] < values[k-1]-tolerance:
+                best = k
+        elif values[k] < values[best]:
+            best = k
+        elif values[k] > values[best]+tolerance:
+            left, middle, right = times[best-1], times[best], t
+            result = minimize_scalar(evaluate, bounds=(left, right), method="bounded",
+                                     options={"xatol": max(1e-10, middle*1e-9), "maxiter": 500})
+            if (not result.success or not left < result.x < right
+                    or result.fun > values[best]+tolerance):
+                raise RuntimeError("Single-gate minimum refinement failed.")
+            return float(result.x), float(result.fun), np.asarray(times), np.asarray(values)
+        if t >= max_time:
+            break
+        t = min(t*growth, max_time)
+    raise RuntimeError(
+        f"No single-gate minimum bracketed up to t={max_time:g}. "
+        "Increase SINGLE_PULSE_SCAN_MAX_TIME or reduce SINGLE_PULSE_SCAN_GROWTH.")
 
-    if cache_file.exists():
 
-        single_pulse_min_time = float(
-            np.load(cache_file)
-        )
+def get_single_pulse_min_time(arr, store, method, use_hessian, options, *, trotter_order):
+    """Scan the selected Suzuki gate; solver arguments belong to the main run.
 
-        print(
-            "Loaded single-pulse minimum time:",
-            single_pulse_min_time,
-        )
-
-        return single_pulse_min_time
-
-
-    print(
-        "Optimizing single Iz_echo pulse..."
-    )
-
-    print_memory(
-        "before single-pulse optimization"
-    )
-
-    result = arr.optimize(
-        ["Iz_echo"],
-        1,
-        method="trust-constr",
-        hessian=True,
-        gradient=OPTIMIZER_GRADIENT,
-        bounds=[
-            (0, 1e6)
-        ],
-        options=options,
-        results_dir=store.directory,
-    )
-
-    print_memory(
-        "after single-pulse optimization"
-    )
-
-    single_pulse_min_time = float(
-        result.x[0]
-    )
-
-    del result
-
-    run_garbage_collection()
-
-    print_memory(
-        "after gc following single-pulse optimization"
-    )
-
-    run_malloc_trim()
-
-    print_memory(
-        "after malloc_trim following single-pulse optimization"
-    )
-
-    np.save(
-        cache_file,
-        single_pulse_min_time,
-    )
-
-    print(
-        "Single-pulse minimum time:",
-        single_pulse_min_time,
-    )
-
-    return single_pulse_min_time
+    A separate versioned cache deliberately ignores legacy Iz_echo .npy files.
+    Cache identity includes the physical model and scan settings. The lock
+    prevents different layer jobs from duplicating the same calibration.
+    """
+    if trotter_order not in TROTTER_ORDERS:
+        raise ValueError("Unsupported Trotter order.")
+    gate = f"SuzukiTrotter{trotter_order}"
+    store_dir = Path(store.directory)
+    store_dir.mkdir(parents=True, exist_ok=True)
+    cache_file = store_dir / f"single_pulse_first_minimum_{gate}.npz"
+    identity = dict(calibration=SINGLE_PULSE_CALIBRATION, gate=gate,
+                    start=SINGLE_PULSE_SCAN_START, growth=SINGLE_PULSE_SCAN_GROWTH,
+                    max_time=SINGLE_PULSE_SCAN_MAX_TIME, tolerance=SINGLE_PULSE_SCAN_TOL)
+    for key in ('_Lx', '_Ly', 'Rb', 'Omega', 'n', 'convention', 'boundary',
+                'backend', 'use_reflections'):
+        identity[key] = getattr(arr, key, None)
+    identity_json = json.dumps(identity, sort_keys=True)
+    with cache_file.with_suffix('.npz.lock').open('a+b') as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        if cache_file.exists():
+            with np.load(cache_file, allow_pickle=False) as saved:
+                if str(saved['identity'].item()) == identity_json:
+                    time = float(saved['time'].item())
+                    if np.isfinite(time) and time > 0:
+                        print(f"Loaded first minimum of {gate}: {time:g}")
+                        return time
+        print(f"Scanning first minimum of {gate}...")
+        time, xi, times, values = scan_first_minimum(
+            lambda t: arr.evaluate([t], [gate]), start=SINGLE_PULSE_SCAN_START,
+            growth=SINGLE_PULSE_SCAN_GROWTH, max_time=SINGLE_PULSE_SCAN_MAX_TIME,
+            tolerance=SINGLE_PULSE_SCAN_TOL)
+        fd, name = tempfile.mkstemp(prefix='.single_gate_', suffix='.npz', dir=store_dir)
+        try:
+            with os.fdopen(fd, 'wb') as stream:
+                np.savez(stream, identity=identity_json, time=time, xi=xi,
+                         scan_times=times, scan_xi=values, trotter_order=trotter_order)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, cache_file)
+        finally:
+            Path(name).unlink(missing_ok=True)
+        print(f"First minimum of {gate}: t={time:g}, xi={xi:g}")
+        return time
 
 
 # ============================================================
@@ -670,6 +684,9 @@ def load_warm_start(
             ]
         )
 
+        source_calibration = (str(data["single_pulse_calibration"].item())
+                              if "single_pulse_calibration" in data else "legacy_Ising")
+
         source_Rb = float(
             data["Rb"]
         )
@@ -748,6 +765,10 @@ def load_warm_start(
     # --------------------------------------------------------
     # Rescale only Ising interaction times
     # --------------------------------------------------------
+
+    if rescale_ising and source_calibration != SINGLE_PULSE_CALIBRATION:
+        print("Legacy/different warm-start calibration: copying shared times without rescaling.")
+        rescale_ising = False
 
     if rescale_ising:
 
@@ -1000,6 +1021,7 @@ def main():
         boundary="open",
         backend="quspin",
         use_reflections=True,
+        interaction_cache_dir=INTERACTION_CACHE_DIR,
     )
 
     print_memory(
@@ -1071,6 +1093,7 @@ def main():
         get_single_pulse_min_time(
             arr=arr,
             store=single_pulse_store,
+            trotter_order=trotter_order,
             method=method,
             use_hessian=use_hessian,
             options=options,
@@ -1577,6 +1600,7 @@ def main():
                 ),
                 n_layers=n_layers,
                 trotter_order=trotter_order,
+                single_pulse_calibration=SINGLE_PULSE_CALIBRATION,
                 gate_sequence=np.asarray(sequence),
                 best_fun=best_fun,
                 best_x=best_x,

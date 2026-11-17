@@ -85,7 +85,7 @@ psi = arr.evolve_suzuki_trotter(arr._initial_state, 20., order=2)
 4x4 open geometry, cluster order n=12, Rb = 1.5, 2, 2.5, 3,
 Omega/Delta = 1/2, 1/3, 1/5, 1/7, 1/10, and 1 through 5 layers.
 Each layer has one composite interaction time, with variational Rx rotations
-only between layers (2*layers-1 parameters). The same single-Iz_echo minimum
+only between layers (2*layers-1 parameters). The first scanned minimum of a single Suzuki-Trotter gate **at the selected order**
 sets the time bound `0 <= t <= 1.5*single_pulse_min_time`.
 No merging across intervening variational rotations is performed.
 
@@ -609,3 +609,54 @@ Rb=1.5, Omega=0.5, gates [Iz_echo, Rx, Iz_echo], initial parameters
 Both solvers converged, but trust-constr was slower for these three-parameter
 examples and reached a different local minimum in the open case. This is
 a smoke benchmark, not evidence of a general speed advantage for either method.
+
+### Single-gate Suzuki calibration
+
+The cluster driver scans increasing shared times for `SuzukiTrotterN` at its
+own order, brackets the first resolved decrease-to-increase turn, then refines
+that interval with scalar minimization (no Hessian at the coherent state).
+`SINGLE_PULSE_SCAN_START`, `SINGLE_PULSE_SCAN_GROWTH`, and
+`SINGLE_PULSE_SCAN_MAX_TIME` control the resolution/range (defaults 0.01, 1.15,
+1e6). A finite grid can miss narrow minima; decrease the growth factor to
+check resolution. Failure to bracket a minimum raises an error rather than
+silently accepting a later optimizer endpoint.
+
+The order-specific `single_pulse_first_minimum_SuzukiTrotterN.npz` cache stores
+the refined time, xi, scan samples and model/scan identity under the ratio
+directory. It is locked and atomically written. Legacy
+`single_pulse_min_time.npy` Ising caches are ignored and left untouched.
+The upper bound remains 1.5 times this order-specific shared time.
+New summaries identify this calibration. Legacy warm starts remain usable,
+but their times are copied without rescaling (then clipped to target bounds),
+since their saved reference time belongs to a different gate. New-calibration
+warm starts retain reference-time rescaling.
+
+### Suzuki–Trotter performance and caches
+
+The cluster driver passes `INTERACTION_CACHE_DIR` (by default
+`data/cache/multibody_interactions` relative to the script) into
+`ConstructSquareArray`. A physical model's expensive cluster expansion is
+computed once and reused across layer counts and Trotter orders. The shared
+filesystem must support POSIX file locks and atomic rename, as required for
+result saving. Jobs requesting the same missing model wait on its lock;
+different models can be built concurrently. Cache files contain numeric
+arrays and JSON metadata, loaded without pickle. Keys include all calculation
+arguments and a hash of the cluster solver source. Changing the model or
+solver therefore creates a separate entry. Set `INTERACTION_CACHE_DIR=None`
+to disable this optional disk cache. Existing callers of the class default
+to no disk caching. Result paths and saved optimization data are unchanged.
+
+During composite-gate differentiation, the state and derivative columns share
+basis rotations. Evolution and first/second derivative updates are performed
+in the diagonal Ising basis, avoiding repeated generator rotations.
+Per-array caches retain at most eight diagonal phase vectors (about 2 MiB for
+the 4x4 reflection-reduced basis) and the two fixed y-rotation sparse
+generators. There is no dense-unitary cache or unbounded state-history cache.
+As before, SciPy objective/gradient/Hessian calls share their latest objective
+evaluation, and the scanned single-gate minimum has its own persistent cache.
+QuSpin bases and collective operators are built once per array, not per
+optimization start; they are not serialized across software environments.
+
+A local 3x2, n=4, two-fourth-order-gate benchmark measured approximately 2.7x
+speedup with gradients and 2.0x with an exact Hessian. These are small-system
+measurements, not a prediction for the full 4x4, n=12 cluster workload.
