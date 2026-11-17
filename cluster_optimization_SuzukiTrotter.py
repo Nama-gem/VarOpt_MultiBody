@@ -67,11 +67,11 @@ INTERACTION_CACHE_DIR = Path(__file__).resolve().parent / "data" / "cache" / "mu
 # Optimizer
 # ------------------------------------------------------------
 
-# method = "L-BFGS-B"
-# use_hessian = False
-
-method = "SLSQP"
+method = "L-BFGS-B"
 use_hessian = False
+
+# method = "SLSQP"
+# use_hessian = False
 
 # method = "trust-constr"
 # use_hessian = True
