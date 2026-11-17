@@ -118,135 +118,25 @@ OPTIMIZER_GRADIENT = None
 
 
 # ============================================================
-# Memory diagnostics
+# Silent memory cleanup
 # ============================================================
 
-MEMORY_DIAGNOSTICS = True
-
 RUN_GC = True
-
-# On Linux/Terra, ask glibc to return unused heap memory
-# to the operating system after each completed optimization.
 RUN_MALLOC_TRIM = True
 
 
-def get_linux_memory():
-    """
-    Return Linux process memory information in MB.
-
-    VmRSS:
-        Current resident memory.
-
-    VmHWM:
-        Peak resident memory ("high water mark").
-
-    VmSize:
-        Current virtual memory size.
-
-    Returns NaN values on systems without /proc/self/status.
-    """
-
-    result = {
-        "VmRSS": np.nan,
-        "VmHWM": np.nan,
-        "VmSize": np.nan,
-    }
-
-    status_file = Path("/proc/self/status")
-
-    if not status_file.exists():
-        return result
-
-    with status_file.open() as f:
-        for line in f:
-            for key in result:
-                if line.startswith(key + ":"):
-                    value_kb = float(
-                        line.split()[1]
-                    )
-                    result[key] = (
-                        value_kb / 1024.0
-                    )
-
-    return result
-
-
-def print_memory(label):
-    """
-    Print current and peak process memory.
-    """
-
-    if not MEMORY_DIAGNOSTICS:
-        return
-
-    memory = get_linux_memory()
-
-    print()
-    print(
-        f"[MEMORY] {label}"
-    )
-    print(
-        f"    VmRSS  = "
-        f"{memory['VmRSS']:.1f} MB"
-    )
-    print(
-        f"    VmHWM  = "
-        f"{memory['VmHWM']:.1f} MB"
-    )
-    print(
-        f"    VmSize = "
-        f"{memory['VmSize']:.1f} MB"
-    )
-
-
 def run_garbage_collection():
-    """
-    Run Python garbage collection.
-    """
-
-    if not RUN_GC:
-        return
-
-    n_collected = gc.collect()
-
-    if MEMORY_DIAGNOSTICS:
-        print(
-            f"[MEMORY] gc.collect() collected "
-            f"{n_collected} objects"
-        )
+    if RUN_GC:
+        gc.collect()
 
 
 def run_malloc_trim():
-    """
-    Ask glibc to return unused heap memory to the operating
-    system.
-
-    Useful on Linux/Terra. Silently continues if unavailable.
-    """
-
-    if not RUN_MALLOC_TRIM:
-        return
-
-    try:
-
-        libc = ctypes.CDLL(
-            "libc.so.6"
-        )
-
-        libc.malloc_trim(0)
-
-        if MEMORY_DIAGNOSTICS:
-            print(
-                "[MEMORY] malloc_trim(0) called"
-            )
-
-    except Exception as exc:
-
-        if MEMORY_DIAGNOSTICS:
-            print(
-                "[MEMORY] malloc_trim unavailable:",
-                repr(exc),
-            )
+    """Release unused heap on Linux; silently continue elsewhere."""
+    if RUN_MALLOC_TRIM:
+        try:
+            ctypes.CDLL("libc.so.6").malloc_trim(0)
+        except (OSError, AttributeError):
+            pass
 
 
 # ============================================================
@@ -611,6 +501,78 @@ def build_warm_start_jobs(results_root, Rb, numerator, denominator, trotter_orde
     return jobs
 
 
+# The added angle is in radians; the split preserves the total time.
+LAYER_SPLIT_ROTATION_MAX = 0.05
+LAYER_SPLIT_FRACTION_RANGE = (0.25, 0.75)
+
+
+def build_layer_warm_start_jobs(source_ratio_dir, n_layers, trotter_order,
+                                Rb, numerator, denominator):
+    """Use adjacent depths at the same physical parameters and Trotter order."""
+    variants = []
+    if n_layers > 1:
+        variants.append((n_layers - 1, "split_largest_interaction"))
+    if n_layers < MAX_LAYERS:
+        variants.extend((n_layers + 1, strategy) for strategy in
+                        ("remove_smallest_rotation", "remove_smallest_interaction"))
+    return [dict(type="warm_start", source_ratio_dir=Path(source_ratio_dir),
+                 source_layers=depth, strategy=strategy, source_order=trotter_order,
+                 source_Rb=Rb, source_numerator=numerator, source_denominator=denominator)
+            for depth, strategy in variants]
+
+
+def transform_layer_warm_start(parameters, strategy, rng=None):
+    """Transform chronological [t0, angle0, t1, ...] by one layer.
+
+    These are guesses, not identities for finite Suzuki steps. At the first
+    interaction, dropping the following Rx leaves only a global phase on
+    |+x>. At the last interaction, dropping the preceding Rx preserves the
+    rotation-invariant squeezing objective. Interior rotations are combined
+    modulo 2*pi. Target time bounds are applied only AFTER the transformation.
+    """
+    x = np.asarray(parameters, dtype=float)
+    if (x.ndim != 1 or x.size == 0 or x.size % 2 != 1
+            or not np.all(np.isfinite(x)) or np.any(x[::2] < 0)):
+        raise ValueError("Expected finite alternating times/angles with nonnegative times.")
+    if strategy == "split_largest_interaction":
+        rng = np.random.default_rng() if rng is None else rng
+        i = 2 * int(np.argmax(x[::2]))
+        fraction = rng.uniform(*LAYER_SPLIT_FRACTION_RANGE)
+        angle = rng.uniform(-LAYER_SPLIT_ROTATION_MAX, LAYER_SPLIT_ROTATION_MAX)
+        return np.concatenate((x[:i], [fraction*x[i], angle, (1-fraction)*x[i]], x[i+1:]))
+    if x.size < 3:
+        raise ValueError("Cannot shorten a single-layer sequence.")
+    if strategy == "remove_smallest_rotation":
+        angles = (x[1::2] + np.pi) % (2*np.pi) - np.pi
+        i = 2 * int(np.argmin(np.abs(angles))) + 1
+        return np.concatenate((x[:i-1], [x[i-1]+x[i+1]], x[i+2:]))
+    if strategy == "remove_smallest_interaction":
+        i = 2 * int(np.argmin(x[::2]))
+        if i == 0:
+            return x[2:].copy()
+        if i == x.size - 1:
+            return x[:-2].copy()
+        angle = (x[i-1] + x[i+1] + np.pi) % (2*np.pi) - np.pi
+        return np.concatenate((x[:i-1], [angle], x[i+2:]))
+    raise ValueError(f"Unknown layer warm-start strategy: {strategy}")
+
+
+def load_layer_warm_start(job, target_bounds, target_single_pulse_min_time, rng=None):
+    """Read the latest source summary, transform, then enforce target bounds."""
+    sequence, source_bounds = gate_sequence(job["source_layers"], np.inf, job["source_order"])
+    x = load_warm_start(job["source_ratio_dir"], job["source_layers"], sequence,
+                        source_bounds, target_single_pulse_min_time, rescale_ising=False)
+    x = transform_layer_warm_start(x, job["strategy"], rng)
+    if len(x) != len(target_bounds):
+        raise ValueError("Layer transformation does not match target depth.")
+    bounded = project_to_bounds(x, target_bounds)
+    print(f"Layer warm start: {job['strategy']} from {job['source_layers']} layers")
+    if not np.array_equal(x, bounded):
+        print("Transformed parameters clipped to target bounds.")
+    print("Transformed starting parameters:", bounded)
+    return bounded
+
+
 def load_warm_start(
     source_ratio_dir,
     n_layers,
@@ -963,23 +925,12 @@ def main():
         f"{OPTIMIZER_GRADIENT}"
     )
 
-    print(
-        f"Memory checks   : "
-        f"{MEMORY_DIAGNOSTICS}"
-    )
 
-    print(
-        f"malloc_trim     : "
-        f"{RUN_MALLOC_TRIM}"
-    )
 
     print("=" * 60)
 
     print(f"Suzuki-Trotter order: {trotter_order}")
 
-    print_memory(
-        "at start of main()"
-    )
 
 
     # ========================================================
@@ -1008,9 +959,6 @@ def main():
     # Construct array
     # ========================================================
 
-    print_memory(
-        "immediately before ConstructSquareArray"
-    )
 
     arr = ConstructSquareArray(
         Lx=LX,
@@ -1024,9 +972,6 @@ def main():
         interaction_cache_dir=INTERACTION_CACHE_DIR,
     )
 
-    print_memory(
-        "immediately after ConstructSquareArray"
-    )
 
 
     # ========================================================
@@ -1159,6 +1104,8 @@ def main():
     # corresponding optimization begins.
     # ========================================================
 
+    layer_rng = np.random.default_rng(
+        None if LHS_SEED_BASE is None else LHS_SEED_BASE + task_id)
     optimization_jobs = []
 
 
@@ -1169,6 +1116,8 @@ def main():
     if USE_WARM_START:
         optimization_jobs.extend(build_warm_start_jobs(
             results_base_dir.parent, Rb, numerator, denominator, trotter_order))
+        optimization_jobs.extend(build_layer_warm_start_jobs(
+            ratio_dir, n_layers, trotter_order, Rb, numerator, denominator))
 
 
     # --------------------------------------------------------
@@ -1281,9 +1230,6 @@ def main():
             "optimization."
         )
 
-    print_memory(
-        "after generation of optimization jobs"
-    )
 
 
     # ========================================================
@@ -1350,9 +1296,10 @@ def main():
                 job["source_ratio_dir"]
             )
 
+            source_layers = job.get("source_layers", n_layers)
             source_summary_file = (
                 source_ratio_dir
-                / f"layers_{n_layers}"
+                / f"layers_{source_layers}"
                 / "summary.npz"
             )
 
@@ -1406,18 +1353,21 @@ def main():
 
             try:
 
-                x0 = load_warm_start(
-                    source_ratio_dir=source_ratio_dir,
-                    n_layers=n_layers,
-                    target_sequence=sequence,
-                    target_bounds=bounds,
-                    target_single_pulse_min_time=(
-                        single_pulse_min_time
-                    ),
-                    rescale_ising=(
-                        WARM_START_RESCALE_ISING
-                    ),
-                )
+                if "strategy" in job:
+                    x0 = load_layer_warm_start(job, bounds, single_pulse_min_time, layer_rng)
+                else:
+                    x0 = load_warm_start(
+                        source_ratio_dir=source_ratio_dir,
+                        n_layers=n_layers,
+                        target_sequence=sequence,
+                        target_bounds=bounds,
+                        target_single_pulse_min_time=(
+                            single_pulse_min_time
+                        ),
+                        rescale_ising=(
+                            WARM_START_RESCALE_ISING
+                        ),
+                    )
 
             except FileNotFoundError:
 
@@ -1450,10 +1400,6 @@ def main():
         # Memory before
         # ====================================================
 
-        print_memory(
-            f"before optimization job "
-            f"{job_index + 1}"
-        )
 
 
         # ====================================================
@@ -1480,10 +1426,6 @@ def main():
         # Memory immediately after
         # ====================================================
 
-        print_memory(
-            f"immediately after optimization job "
-            f"{job_index + 1}"
-        )
 
 
         # ====================================================
@@ -1658,10 +1600,6 @@ def main():
 
         run_garbage_collection()
 
-        print_memory(
-            f"after gc.collect(), "
-            f"job {job_index + 1}"
-        )
 
 
         # ====================================================
@@ -1670,10 +1608,6 @@ def main():
 
         run_malloc_trim()
 
-        print_memory(
-            f"after malloc_trim(), "
-            f"job {job_index + 1}"
-        )
 
         print(
             "-" * 60
@@ -1753,9 +1687,6 @@ def main():
         f"{summary_file.resolve()}"
     )
 
-    print_memory(
-        "at end of main()"
-    )
 
 
 if __name__ == "__main__":

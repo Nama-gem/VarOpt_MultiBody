@@ -97,7 +97,7 @@ The driver uses immediate neighbors in the configured Rb, Omega/Delta, and
 Trotter-order lists, changing exactly one coordinate at a time and keeping the
 layer count fixed. For example, ratio 1/5 neighbors 1/3 and 1/7. `WARM_START_INCLUDE_LHS` enables additional
 Latin-hypercube starts; it is currently False (warm-start-only runs). `WARM_START_TROTTER_ORDERS` controls source orders.
-There are at most 6 candidate sources (3 at grid corners). Diagonal neighbors
+There are at most 6 same-depth candidate sources (3 at grid corners). Diagonal neighbors
 and the target itself are excluded. The warm-start source lists can filter out
 neighbors without making more distant points eligible.
 Missing source summaries are skipped; available summaries are read immediately
@@ -106,6 +106,25 @@ calibration-time ratio and clipped to target bounds; Rx angles are unchanged
 except for bound projection. No order-dependent time rescaling is needed:
 each gate's signed z and x coefficients sum to one. Set
 `WARM_START_INCLUDE_LHS=False` for warm-start-only runs once summaries exist.
+
+Adjacent depths supply up to three additional warm starts at the same Rb,
+Omega/Delta, and Trotter order:
+- From L-1: split the largest interaction time at a random fraction in
+  [0.25, 0.75], inserting an Rx angle uniformly drawn from [-0.05, 0.05] radians.
+- From L+1: remove the rotation with the smallest absolute angle and add the
+  interaction times on either side.
+- Also from L+1: remove the smallest interaction time and combine its neighboring
+  rotations, wrapping the result to [-pi, pi). At either end, drop the single
+  neighboring rotation: an initial Rx only changes the |+x> state by a global
+  phase; a final Rx preserves the squeezing objective.
+
+These starts use the newest available summary without time rescaling, then clip
+transformed parameters to the target bounds (merged times can exceed the bound).
+They are approximate guesses for finite Suzuki gates, not exact circuit identities.
+Only depths within 1 through MAX_LAYERS are scheduled. Missing results are skipped.
+The split settings are LAYER_SPLIT_FRACTION_RANGE and LAYER_SPLIT_ROTATION_MAX;
+LHS_SEED_BASE also seeds the independent split RNG when set. Memory diagnostics
+are removed; garbage collection and Linux heap cleanup remain silent.
 
 To run only fourth order on the cluster:
 `sbatch --array=300-399 jobscript_SuzukiTrotter.sh`.
