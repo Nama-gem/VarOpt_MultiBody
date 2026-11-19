@@ -90,9 +90,9 @@ sets the time bound `0 <= t <= 1.5*single_pulse_min_time`.
 No merging across intervening variational rotations is performed.
 
 Submit `sbatch jobscript_SuzukiTrotter.sh` on the configured cluster.
-Array IDs 0..99 select first order; 100..199 second order; 200..299 third order; 300..399 fourth order, with the
+Array IDs 0..99 select first order; 100..199 second order; 200..299 third order; 300..399 fourth order; 400..499 fifth order, with the
 original Rb/ratio/layer ordering within each half. Results and warm starts are
-isolated under `results_SuzukiTrotter/order_1/`, `order_2/`, `order_3/`, and `order_4/`.
+isolated under `results_SuzukiTrotter/order_1/`, `order_2/`, `order_3/`, `order_4/`, and `order_5/`.
 The driver uses immediate neighbors in the configured Rb, Omega/Delta, and
 Trotter-order lists, changing exactly one coordinate at a time and keeping the
 layer count fixed. For example, ratio 1/5 neighbors 1/3 and 1/7. `WARM_START_INCLUDE_LHS` enables additional
@@ -128,7 +128,7 @@ are removed; garbage collection and Linux heap cleanup remain silent.
 
 To run only fourth order on the cluster:
 `sbatch --array=300-399 jobscript_SuzukiTrotter.sh`.
-The default submission covers all 400 cases. Existing order-1/2 paths and task
+The default submission covers all 500 cases. Existing order-1/2 paths and task
 IDs are unchanged; the best-result saving mechanism is unchanged.
 
 ## Project layout and notebook
@@ -702,3 +702,27 @@ QuSpin versions and the array module source hash. A fresh QuSpin basis object
 is always constructed; only matching numeric operators are restored. Each
 array gets independent mutable buffers. A 4x4 reflection-reduced geometry
 cache occupies about 13 MB on disk, shared by all its physical parameter cases.
+
+### Fifth-order Suzuki–Trotter option
+
+`SuzukiTrotter5` composes the existing symmetric fourth-order gate at times
+`a*t, a*t, b*t` chronologically, with `a=1/(2-2**(1/5))` and `b=1-2*a`.
+The identities `2*a+b=1` and `2*a**5+b**5=0` cancel the leading fourth-order
+error. This nonsymmetric composition has local error O(t**6), hence global
+order five. The symmetric arrangement `a,b,a` would instead have order six.
+Adjacent echoed ZZ factors are merged, leaving 19 echoed factors, or 38 native
+Ising applications. Absolute native interaction time is approximately
+`21.00155612113874*abs(t)`; interaction-sign reversal is required.
+All orders start with ZZ; orders 2 and 4 are palindromic and also end with ZZ.
+
+The cluster driver includes order 5, its own first-minimum calibration, and
+neighbor warm starts from order 4 plus the existing adjacent-depth starts.
+To submit only the 100 fifth-order cases:
+`sbatch --array=400-499 jobscript_SuzukiTrotter.sh`.
+The default job array now covers 500 cases. Existing order-1–4 IDs are unchanged.
+Both Suzuki analysis notebooks include order 5.
+
+Order comparisons are asymptotic in step size, not monotonic at any finite t.
+Also, echoed multibody Trotter gates target H_even,z+H_even,x, which contains
+higher even-body terms. The pairwise ZZ+XX reference matches this target only
+when `TROTTER_PAIR_ONLY=True` in the single-pulse comparison notebook.

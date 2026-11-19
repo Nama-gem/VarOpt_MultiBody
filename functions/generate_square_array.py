@@ -13,6 +13,19 @@ from .rydberg_cluster import calculate_interactions
 from .second_order import squeezing_second_order
 
 
+def _compose_trotter_factors(factors, weights):
+    """Compose chronological splitting factors and merge adjacent same-axis terms."""
+    result = []
+    for weight in weights:
+        for token, coefficient in factors:
+            coefficient *= weight
+            if result and result[-1][0] == token:
+                result[-1] = (token, result[-1][1] + coefficient)
+            else:
+                result.append((token, coefficient))
+    return tuple(result)
+
+
 class ConstructSquareArray:
     """QuSpin reflection-reduced simulator, with an optional NumPy full basis.
 
@@ -25,7 +38,7 @@ class ConstructSquareArray:
     at construction: build a new object when changing the interaction.
     """
     gates = ('Rx', 'Ry', 'Rz', 'Iz', 'Iz_echo', 'Dz', 'Ix', 'Ix_echo', 'XY', 'XY_echo',
-             'SuzukiTrotter1', 'SuzukiTrotter2', 'SuzukiTrotter3', 'SuzukiTrotter4')
+             'SuzukiTrotter1', 'SuzukiTrotter2', 'SuzukiTrotter3', 'SuzukiTrotter4', 'SuzukiTrotter5')
     # Chronological factors; all durations share the single gate parameter t.
     _fourth_w = 1 / (2 - 2**(1/3))
     _fourth_v = 1 - 2*_fourth_w
@@ -45,6 +58,14 @@ class ConstructSquareArray:
                            ('Iz_echo', (_fourth_w+_fourth_v)/2),
                            ('Ix_echo', _fourth_w), ('Iz_echo', _fourth_w/2)),
     }
+
+    # Nonsymmetric composition of symmetric fourth-order steps. With
+    # a=1/(2-2**(1/5)), b=1-2*a: 2*a+b=1 and 2*a**5+b**5=0.
+    # This cancels the t**5 log-error; nonsymmetry leaves a t**6 term,
+    # giving genuine fifth order (unlike the symmetric a,b,a sixth order).
+    _fifth_a = 1 / (2 - 2**(1/5))
+    _trotter_factors['SuzukiTrotter5'] = _compose_trotter_factors(
+        _trotter_factors['SuzukiTrotter4'], (_fifth_a, _fifth_a, 1-2*_fifth_a))
 
     def __init__(self, Lx, Ly, Rb, Omega, n, *, max_sites=20,
                  max_clusters=1_000_000, convention='paper', boundary='open',
@@ -413,12 +434,15 @@ class ConstructSquareArray:
         Order 4 is the symmetric triple jump of order 2, with adjacent z
         factors merged (7 echoed factors, 14 native applications). Its
         absolute native time is (7/(2-2**(1/3))-2)*abs(t).
-        Orders 3/4 require physical interaction-sign reversal.
+        Order 5 composes fourth-order steps chronologically at (a*t,a*t,b*t),
+        a=1/(2-2**(1/5)), b=1-2*a, with adjacent z factors merged:
+        19 echoed factors / 38 native applications. It has local error O(t**6).
+        Orders 3/4/5 require physical interaction-sign reversal.
         The explicit order-1 pulse sequence differs only by a global 2*pi
         spin-rotation phase, which is omitted here.
         """
-        if order not in (1, 2, 3, 4):
-            raise ValueError('order must be 1, 2, 3 or 4.')
+        if order not in (1, 2, 3, 4, 5):
+            raise ValueError('order must be 1, 2, 3, 4 or 5.')
         if not np.isfinite(time):
             raise ValueError('time must be finite.')
         return self._apply_gate(state, f'SuzukiTrotter{order}', time)
